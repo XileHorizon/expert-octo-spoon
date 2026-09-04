@@ -1,0 +1,139 @@
+/*
+ * Global design tokens
+ *
+ * Keep this list compact: shared visual decisions belong here; one-off
+ * component geometry stays beside the component rule in globals.css.
+ */
+:root {
+  /* Brand and customer surfaces */
+  --color-brand: #dd0f14;
+  --color-brand-hover: #c20d12;
+  --color-brand-soft: #fff8f8;
+  --color-page: #f8fafc;
+  --color-surface: #fff;
+  --color-surface-muted: #f1f5f9;
+  --color-ink: #292a32;
+  --color-text: var(--color-ink);
+  --color-text-secondary: #484950;
+  --color-text-muted: #818183;
+  --color-border: #cbd5e1;
+
+  /* Status colors */
+  --color-success: #008f38;
+  --color-success-soft: #f1ffef;
+  --color-success-border: #cdeec8;
+  --color-danger: #d32e31;
+  --color-danger-strong: #9d1216;
+  --color-danger-border: #f7c9ca;
+  --color-positive-text: #067647;
+  --color-positive-soft: #ecfdf3;
+  --color-negative-text: #b42318;
+  --color-negative-soft: #fef3f2;
+  --color-negative-border: #fda29b;
+  --color-warning-text: #735d19;
+  --color-warning-border: #f2d98f;
+  --color-warning-soft: #fff9e6;
+  --color-file-preview: #ffcd92;
+
+  /* Owner dashboard */
+  --color-admin-accent: #173b2c;
+  --color-admin-heading: #27352e;
+  --color-admin-body: #3b463f;
+  --color-admin-copy: #66726b;
+  --color-admin-muted: #79837c;
+  --color-admin-label: #6d7a72;
+  --color-admin-empty: #718078;
+  --color-admin-border: #d9d9d2;
+  --color-admin-header-border: #d5d6d0;
+  --color-admin-control-border: #cdd2cd;
+  --color-admin-button-border: #bfc7c1;
+  --color-admin-divider: #ecece7;
+  --color-admin-subtle: #fbfbf8;
+  --color-admin-warning-text: #a34728;
+  --color-admin-warning-border: #e5c766;
+  --color-admin-focus: #f15a2a;
+  --color-admin-highlight: #ffb398;
+  --color-admin-preview-accent: #ff8c64;
+  --color-admin-delete: #9a3219;
+  --color-admin-tab: #41504a;
+  --color-admin-metric: #17211c;
+  --color-admin-metric-detail: #7c8781;
+  --color-admin-table-heading: #f6f7f4;
+  --color-admin-card-border: #e3e4de;
+  --color-admin-active-border: #b9c1bc;
+  --color-admin-summary: #49564f;
+  --color-admin-section-border: #e6e7e2;
+  --color-admin-note-text: #77502b;
+  --color-admin-note-border: #ead9aa;
+  --color-admin-estimate: #f5f6f3;
+  --color-admin-estimate-note: #7b5d47;
+  --color-admin-disclaimer: #65716b;
+  --color-admin-disclaimer-border: #d5d9d5;
+  --color-admin-summary-border: #dce1de;
+  --color-admin-summary-copy: #d1dad5;
+  --color-admin-summary-empty: #cad5cf;
+  --color-admin-summary-rule: #416150;
+  --color-admin-summary-manual: #dbe4df;
+
+  /* Catalog and pricing portal */
+  --color-portal-brand: #d92d20;
+  --color-portal-page: #f5f6f8;
+  --color-portal-text: #202124;
+  --color-portal-muted: #667085;
+  --color-portal-border: #d9dee7;
+  --color-portal-sidebar: #292a2d;
+  --color-portal-sidebar-text: #e4e5e7;
+  --color-portal-sidebar-hover: #37383c;
+  --color-portal-sidebar-active: #44464b;
+  --color-portal-sidebar-muted: #b9bbc1;
+  --color-portal-sidebar-panel: rgba(255, 255, 255, .04);
+  --color-portal-caution-text: #b54708;
+  --color-portal-preview: #fbfbfc;
+
+  /* Typography */
+  --font-fallback-body: Inter, Arial, sans-serif;
+  --font-fallback-display: Manrope, Arial, sans-serif;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
+  --font-size-2xl: 24px;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Shape and elevation */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-pill: 999px;
+  --shadow-card: 0 4px 6px rgba(0, 0, 0, .02);
+  --shadow-control: 0 1px 1px rgba(0, 0, 0, .04);
+  --shadow-summary: 0 4px 6px rgba(0, 0, 0, .06);
+  --shadow-auth: 0 24px 70px rgba(7, 21, 14, .2);
+  --shadow-raised: 0 5px 18px rgba(24, 37, 30, .05);
+  --shadow-portal-card: 0 3px 10px rgba(16, 24, 40, .04);
+  --focus-ring-brand: 0 0 0 3px rgba(221, 15, 20, .08);
+
+  /* Shared layout and controls */
+  --layout-quote-max: 1280px;
+  --layout-admin-max: 1240px;
+  --layout-sidebar-width: 232px;
+  --control-height: 42px;
+  --control-height-lg: 44px;
+  --control-height-submit: 58px;
+}
