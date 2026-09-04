@@ -27,7 +27,9 @@ Set `MAX_EMAIL_MESSAGE_BYTES` to the lower limit of the sender and receiving mai
 npm install
 cp .env.example .env.local
 # Configure DATABASE_URL, APP_URL, SMTP values, recipient, and email-size limit
+# db:init reads DATABASE_URL from .env.local
 npm run db:init
+# Replace the example below with the owner's real email address.
 npm run create-owner -- owner@example.com
 npm run build
 npm start

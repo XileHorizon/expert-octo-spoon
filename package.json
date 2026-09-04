@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "create-owner": "node scripts/create-owner.mjs",
-    "db:init": "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f db/schema.sql && psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f db/seed-required-catalog.sql && psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f db/seed-pricing-details.sql",
+    "db:init": "node --env-file=.env.local scripts/init-db.mjs",
     "verify:e2e": "node scripts/verify-e2e.mjs",
     "maintenance": "node scripts/maintenance.mjs",
     "deploy": "bash scripts/deploy.sh",
