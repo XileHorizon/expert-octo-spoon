@@ -45,7 +45,7 @@ export async function POST(request: Request) {
   }
 
   if (databaseReady) {
-    const existing = await queryOne<{ id: string; status: string }>("select id, status from quote_requests where idempotency_key = $1", [parsed.data.idempotencyKey]);
+    const existing = await queryOne<{ id: string; status: string }>("select id, status from quote_requests where idempotency_key = ?", [parsed.data.idempotencyKey]);
     if (existing) return NextResponse.json({ requestId: existing.id, status: existing.status, duplicate: true });
   } else {
     const existing = await findLocalRequestByIdempotencyKey(parsed.data.idempotencyKey);
@@ -91,7 +91,7 @@ export async function POST(request: Request) {
       await client.query(
         `insert into quote_requests (id, idempotency_key, customer_name, customer_email, organization, phone,
            pricing_status, calculated_total, status)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,'received')`,
+         values (?,?,?,?,?,?,?,?,'received')`,
         [
           requestId,
           parsed.data.idempotencyKey,
@@ -112,7 +112,7 @@ export async function POST(request: Request) {
              product_id, size_id, material_id, product_name, size_name, material_name, finishing_names,
              custom_width, custom_height, custom_units, color_mode, orientation,
              quantity, sides, finishing_ids, notes, storage_path, pricing_status, calculated_subtotal, pricing_reason)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,null,$23,$24,$25)`,
+           values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,null,?,?,?)`,
           [
             requestId, job.clientId, job.fileName, job.fileSize, job.mimeType, job.pageCount,
             job.productId, job.sizeId, job.materialId,
@@ -133,13 +133,13 @@ export async function POST(request: Request) {
 
   const summary = formatQuoteEmail({ requestId, payload: parsed.data, pricing, catalog });
   const email = await sendQuoteNotification({ requestId, customerEmail: parsed.data.customer.email, summary, attachments });
-  await queryOne(
-    "insert into email_deliveries (quote_request_id, status, provider_message_id, error_message) values ($1,$2,$3,$4) returning id",
+  await query(
+    "insert into email_deliveries (quote_request_id, status, provider_message_id, error_message) values (?,?,?,?)",
     [requestId, email.status, email.providerId ?? null, email.error ?? null],
   ).catch(() => null);
 
   if (email.status !== "provider_accepted") {
-    await query("update quote_requests set status = 'intake_failed' where id = $1", [requestId]).catch(() => null);
+    await query("update quote_requests set status = 'intake_failed' where id = ?", [requestId]).catch(() => null);
     return NextResponse.json({ error: "The request could not be safely accepted because the file email was not delivered. Your form entries are still available; try again or contact the shop.", requestId }, { status: 502 });
   }
   return NextResponse.json({ requestId, status: "received", pricingStatus: pricing.status, emailStatus: email.status }, { status: 201 });

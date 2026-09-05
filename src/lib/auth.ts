@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
-import { isDatabaseConfigured, queryOne, query } from "./db";
+import { isDatabaseConfigured, queryOne, query, transaction } from "./db";
 
 export const SESSION_COOKIE = "spe_owner_session";
 const SESSION_TTL_HOURS = Number(process.env.SESSION_TTL_HOURS ?? 12);
@@ -39,7 +39,7 @@ export async function verifyPassword(password: string, hash: string) {
 export async function createSession(ownerId: string) {
   const token = newToken();
   const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS * 60 * 60 * 1000);
-  await query("insert into owner_sessions(token_hash, owner_id, expires_at) values ($1,$2,$3)", [hashToken(token), ownerId, expiresAt]);
+  await query("insert into owner_sessions(token_hash, owner_id, expires_at) values (?,?,?)", [hashToken(token), ownerId, expiresAt]);
   const store = await cookies();
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -54,7 +54,7 @@ export async function createSession(ownerId: string) {
 export async function destroyCurrentSession() {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
-  if (token) await query("delete from owner_sessions where token_hash = $1", [hashToken(token)]);
+  if (token) await query("delete from owner_sessions where token_hash = ?", [hashToken(token)]);
   store.delete(SESSION_COOKIE);
 }
 
@@ -73,14 +73,14 @@ export async function requireApprovedOwner(): Promise<AuthResult> {
     `select o.id, o.email, o.active, s.expires_at
        from owner_sessions s
        join owners o on o.id = s.owner_id
-      where s.token_hash = $1`,
+      where s.token_hash = ?`,
     [hashToken(token)],
   ).catch(() => "DB_ERROR" as const);
 
   if (row === "DB_ERROR") return { ok: false, status: 503, error: "The database is unavailable. Try again shortly." };
   if (!row) return { ok: false, status: 401, error: "Authentication required." };
   if (new Date(row.expires_at).getTime() <= Date.now()) {
-    await query("delete from owner_sessions where token_hash = $1", [hashToken(token)]).catch(() => null);
+    await query("delete from owner_sessions where token_hash = ?", [hashToken(token)]).catch(() => null);
     return { ok: false, status: 401, error: "Your session expired. Sign in again." };
   }
   if (!row.active) return { ok: false, status: 403, error: "This owner account is disabled." };
@@ -88,32 +88,38 @@ export async function requireApprovedOwner(): Promise<AuthResult> {
 }
 
 export async function findOwnerByEmail(email: string) {
-  return queryOne<OwnerRow>("select id, email, password_hash, active from owners where lower(email) = lower($1)", [email]);
+  return queryOne<OwnerRow>("select id, email, password_hash, active from owners where email = ?", [email]);
 }
 
 /** Returns the raw reset token; only its hash is stored. */
 export async function createPasswordReset(ownerId: string) {
   const token = newToken();
   const expiresAt = new Date(Date.now() + RESET_TTL_MINUTES * 60 * 1000);
-  await query("delete from owner_password_resets where owner_id = $1 and used_at is null", [ownerId]);
-  await query("insert into owner_password_resets(token_hash, owner_id, expires_at) values ($1,$2,$3)", [hashToken(token), ownerId, expiresAt]);
+  await transaction(async (client) => {
+    await client.query("delete from owner_password_resets where owner_id = ? and used_at is null", [ownerId]);
+    await client.query("insert into owner_password_resets(token_hash, owner_id, expires_at) values (?,?,?)", [hashToken(token), ownerId, expiresAt]);
+  });
   return { token, expiresAt, ttlMinutes: RESET_TTL_MINUTES };
 }
 
 export async function consumePasswordReset(token: string, newPassword: string) {
-  const row = await queryOne<{ owner_id: string; expires_at: Date; used_at: Date | null }>(
-    "select owner_id, expires_at, used_at from owner_password_resets where token_hash = $1",
-    [hashToken(token)],
-  );
-  if (!row || row.used_at) return { ok: false as const, error: "This reset link is no longer valid. Request a new one." };
-  if (new Date(row.expires_at).getTime() <= Date.now()) return { ok: false as const, error: "This reset link expired. Request a new one." };
-
   const hash = await hashPassword(newPassword);
-  await query("update owners set password_hash = $1 where id = $2", [hash, row.owner_id]);
-  await query("update owner_password_resets set used_at = now() where token_hash = $1", [hashToken(token)]);
-  // Force re-authentication everywhere after a password change.
-  await query("delete from owner_sessions where owner_id = $1", [row.owner_id]);
-  return { ok: true as const, ownerId: row.owner_id };
+  const tokenHash = hashToken(token);
+  return transaction(async (client) => {
+    const result = await client.query<{ owner_id: string; expires_at: Date; used_at: Date | null }>(
+      "select owner_id, expires_at, used_at from owner_password_resets where token_hash = ? for update",
+      [tokenHash],
+    );
+    const row = result.rows[0];
+    if (!row || row.used_at) return { ok: false as const, error: "This reset link is no longer valid. Request a new one." };
+    if (new Date(row.expires_at).getTime() <= Date.now()) return { ok: false as const, error: "This reset link expired. Request a new one." };
+
+    await client.query("update owners set password_hash = ? where id = ?", [hash, row.owner_id]);
+    await client.query("update owner_password_resets set used_at = utc_timestamp(3) where token_hash = ?", [tokenHash]);
+    // Force re-authentication everywhere after a password change.
+    await client.query("delete from owner_sessions where owner_id = ?", [row.owner_id]);
+    return { ok: true as const, ownerId: row.owner_id };
+  });
 }
 
 /** Constant-time compare helper for any fixed-length secret comparisons. */
@@ -125,6 +131,6 @@ export function safeEquals(a: string, b: string) {
 }
 
 export async function purgeExpiredAuthRecords() {
-  await query("delete from owner_sessions where expires_at < now()");
-  await query("delete from owner_password_resets where expires_at < now() and used_at is null");
+  await query("delete from owner_sessions where expires_at < utc_timestamp(3)");
+  await query("delete from owner_password_resets where expires_at < utc_timestamp(3) and used_at is null");
 }

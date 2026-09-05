@@ -1,61 +1,93 @@
-import { Pool, type QueryResultRow } from "pg";
+import mysql, { type Pool, type PoolConnection, type ResultSetHeader } from "mysql2/promise";
 
-/**
- * Portable PostgreSQL access. Works against any PostgreSQL 14+ instance
- * (managed or self-hosted) through a standard DATABASE_URL connection string.
- */
+type DatabaseRow = Record<string, unknown>;
+export type QueryResult<T extends DatabaseRow = DatabaseRow> = {
+  rows: T[];
+  rowCount: number;
+  affectedRows: number;
+  insertId: number;
+};
 
-declare global {
-  var __shipPrintPool: Pool | undefined;
+export type DatabaseClient = { query<T extends DatabaseRow = DatabaseRow>(sql: string, params?: unknown[]): Promise<QueryResult<T>> };
+
+declare global { var __shipPrintPool: Pool | undefined; }
+
+function databaseConfig() {
+  const uri = process.env.MYSQL_URL;
+  if (!uri) return null;
+  return {
+    uri,
+    max: Number(process.env.DATABASE_POOL_MAX ?? 10),
+    ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined,
+  };
 }
 
 export function getPool(): Pool | null {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) return null;
+  const config = databaseConfig();
+  if (!config) return null;
   if (!globalThis.__shipPrintPool) {
-    globalThis.__shipPrintPool = new Pool({
-      connectionString,
-      max: Number(process.env.DATABASE_POOL_MAX ?? 10),
-      idleTimeoutMillis: 30_000,
-      connectionTimeoutMillis: 10_000,
-      ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined,
+    globalThis.__shipPrintPool = mysql.createPool({
+      uri: config.uri,
+      connectionLimit: config.max,
+      waitForConnections: true,
+      queueLimit: 0,
+      connectTimeout: 10_000,
+      timezone: "Z",
+      dateStrings: false,
+      ssl: config.ssl,
+      decimalNumbers: false,
+      typeCast(field, next) {
+        if (field.type === "TINY" && field.length === 1) return field.string() === "1";
+        return next();
+      },
     });
   }
   return globalThis.__shipPrintPool;
 }
 
-export function isDatabaseConfigured() {
-  return Boolean(process.env.DATABASE_URL);
+export function isDatabaseConfigured() { return Boolean(process.env.MYSQL_URL); }
+
+function normalize<T extends DatabaseRow>(value: unknown): QueryResult<T> {
+  if (Array.isArray(value)) return { rows: value as T[], rowCount: value.length, affectedRows: 0, insertId: 0 };
+  const result = value as ResultSetHeader;
+  return { rows: [], rowCount: result.affectedRows, affectedRows: result.affectedRows, insertId: result.insertId };
 }
 
-export async function query<T extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []) {
+type ExecuteParams = NonNullable<Parameters<PoolConnection["execute"]>[1]>;
+
+async function execute<T extends DatabaseRow>(executor: Pool | PoolConnection, sql: string, params: unknown[] = []) {
+  const [result] = await executor.execute(sql, params as ExecuteParams);
+  return normalize<T>(result);
+}
+
+export async function query<T extends DatabaseRow = DatabaseRow>(sql: string, params: unknown[] = []) {
   const pool = getPool();
-  if (!pool) throw new Error("DATABASE_URL is not configured.");
-  return pool.query<T>(text, params);
+  if (!pool) throw new Error("MYSQL_URL is not configured.");
+  return execute<T>(pool, sql, params);
 }
 
-export async function queryRows<T extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []) {
-  return (await query<T>(text, params)).rows;
+export async function queryRows<T extends DatabaseRow = DatabaseRow>(sql: string, params: unknown[] = []) {
+  return (await query<T>(sql, params)).rows;
 }
 
-export async function queryOne<T extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []) {
-  return (await query<T>(text, params)).rows[0] ?? null;
+export async function queryOne<T extends DatabaseRow = DatabaseRow>(sql: string, params: unknown[] = []) {
+  return (await query<T>(sql, params)).rows[0] ?? null;
 }
 
-/** Runs a set of statements in a single transaction, rolling back on any error. */
-export async function transaction<T>(handler: (client: import("pg").PoolClient) => Promise<T>): Promise<T> {
+export async function transaction<T>(handler: (client: DatabaseClient) => Promise<T>): Promise<T> {
   const pool = getPool();
-  if (!pool) throw new Error("DATABASE_URL is not configured.");
-  const client = await pool.connect();
+  if (!pool) throw new Error("MYSQL_URL is not configured.");
+  const connection = await pool.getConnection();
+  const client: DatabaseClient = { query: (sql, params = []) => execute(connection, sql, params) };
   try {
-    await client.query("begin");
+    await connection.beginTransaction();
     const result = await handler(client);
-    await client.query("commit");
+    await connection.commit();
     return result;
   } catch (error) {
-    await client.query("rollback");
+    await connection.rollback();
     throw error;
   } finally {
-    client.release();
+    connection.release();
   }
 }

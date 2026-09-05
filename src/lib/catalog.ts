@@ -27,7 +27,7 @@ const SIZES: { id: string; name: string; dimensions: string; billingUnit: Billin
 
 /**
  * Required initial size and paper mapping. Prices stay unset unless a development
- * preview is explicitly enabled; production owners set real prices in PostgreSQL.
+ * preview is explicitly enabled; production owners set real prices in MySQL.
  */
 export function getSeedCatalog(): Catalog {
   const demo = process.env.NEXT_PUBLIC_ENABLE_DEMO_PRICING === "true";

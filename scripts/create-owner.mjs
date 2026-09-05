@@ -5,14 +5,14 @@
  *   npm run create-owner -- owner@example.com
  *
  * The password is read from stdin (hidden) and never appears in shell history,
- * arguments, or logs. Requires DATABASE_URL in the environment or .env.local.
+ * arguments, or logs. Requires MYSQL_URL in the environment or .env.local.
  */
 
 import { createInterface } from "node:readline";
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import bcrypt from "bcryptjs";
-import { Pool } from "pg";
+import mysql from "mysql2/promise";
 
 const MIN_PASSWORD_LENGTH = 12;
 
@@ -52,7 +52,7 @@ function passwordProblem(password) {
 
 const email = process.argv[2];
 if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) fail("Usage: npm run create-owner -- owner@example.com");
-if (!process.env.DATABASE_URL) fail("DATABASE_URL is not set. Add it to .env.local or the environment.");
+if (!process.env.MYSQL_URL) fail("MYSQL_URL is not set. Run npm run setup:local or add it to .env.local.");
 
 const password = await askHidden(`Password for ${email}: `);
 const confirm = await askHidden("Confirm password: ");
@@ -60,21 +60,23 @@ if (password !== confirm) fail("Passwords did not match.");
 const problem = passwordProblem(password);
 if (problem) fail(problem);
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+const pool = mysql.createPool({
+  uri: process.env.MYSQL_URL,
+  connectionLimit: 2,
+  timezone: "Z",
   ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined,
 });
 
 try {
   const hash = await bcrypt.hash(password, 12);
-  const existing = await pool.query("select id from owners where lower(email) = lower($1)", [email]);
+  const [existing] = await pool.execute("select id from owners where email = ?", [email]);
 
-  if (existing.rowCount > 0) {
-    await pool.query("update owners set password_hash = $1, active = true where id = $2", [hash, existing.rows[0].id]);
-    await pool.query("delete from owner_sessions where owner_id = $1", [existing.rows[0].id]);
+  if (existing.length > 0) {
+    await pool.execute("update owners set password_hash = ?, active = true where id = ?", [hash, existing[0].id]);
+    await pool.execute("delete from owner_sessions where owner_id = ?", [existing[0].id]);
     console.log(`\nUpdated the password for ${email}. Existing sessions were signed out.\n`);
   } else {
-    await pool.query("insert into owners (email, password_hash, active) values ($1,$2,true)", [email, hash]);
+    await pool.execute("insert into owners (email, password_hash, active) values (?,?,true)", [email, hash]);
     console.log(`\nCreated owner account ${email}. Sign in at /admin/login.\n`);
   }
 } catch (error) {

@@ -17,24 +17,22 @@ die() { printf '\n\033[31mError: %s\033[0m\n\n' "$*" >&2; exit 1; }
 [ -f .env.local ] || die "No .env.local found. Copy .env.example to .env.local and fill it in first."
 
 set -a; . ./.env.local; set +a
-[ -n "${DATABASE_URL:-}" ] || die "DATABASE_URL is not set in .env.local"
+[ -n "${MYSQL_URL:-}" ] || die "MYSQL_URL is not set in .env.local"
 [ -n "${APP_URL:-}" ]      || die "APP_URL is not set in .env.local (password reset links need it)"
 
 command -v node >/dev/null || die "Node.js is not installed."
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-[ "$NODE_MAJOR" -ge 20 ] || die "Node.js 20 or newer is required (found $(node -v))."
+[ "$NODE_MAJOR" -eq 24 ] || die "Node.js 24 is required (found $(node -v))."
 
 say "1/6  Checking the database connection"
-psql "$DATABASE_URL" -c 'select 1' >/dev/null 2>&1 || die "Cannot connect using DATABASE_URL. Check the value and that PostgreSQL is reachable."
+node --env-file-if-exists=.env.local -e 'const m=require("mysql2/promise");(async()=>{const c=await m.createConnection(process.env.MYSQL_URL);await c.query("select 1");await c.end()})().catch(()=>process.exit(1))' || die "Cannot connect using MYSQL_URL. Check the cPanel database, user grants, hostname, and port."
 echo "     connected"
 
 say "2/6  Installing dependencies"
-npm ci --omit=dev 2>/dev/null || npm install --omit=dev
+npm ci
 
 say "3/6  Applying the database schema"
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/schema.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/seed-required-catalog.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/seed-pricing-details.sql
+npm run db:init
 echo "     schema and required catalog mapping up to date"
 
 say "4/6  Checking email configuration"
@@ -44,7 +42,6 @@ say "4/6  Checking email configuration"
 echo "     SMTP handoff configured"
 
 say "5/6  Building"
-npm install --include=dev --no-audit --no-fund >/dev/null
 npm run build
 
 say "6/6  Starting under PM2"

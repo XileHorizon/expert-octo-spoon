@@ -27,11 +27,12 @@ export async function GET(request: Request) {
 
   if (status !== "all") {
     params.push(status);
-    conditions.push(`status = $${params.length}`);
+    conditions.push("status = ?");
   }
   if (search) {
     params.push(`%${search}%`);
-    conditions.push(`(customer_name ilike $${params.length} or customer_email ilike $${params.length} or coalesce(organization,'') ilike $${params.length})`);
+    conditions.push("(customer_name like ? or customer_email like ? or coalesce(organization,'') like ?)");
+    params.push(`%${search}%`, `%${search}%`);
   }
   const where = conditions.length ? `where ${conditions.join(" and ")}` : "";
 
@@ -41,10 +42,10 @@ export async function GET(request: Request) {
         `select id, customer_name, customer_email, organization, status, pricing_status, calculated_total, created_at
            from quote_requests ${where}
           order by created_at desc
-          limit $${params.length + 1} offset $${params.length + 2}`,
+          limit ? offset ?`,
         [...params, limit, offset],
       ),
-      queryRows<{ count: string }>(`select count(*)::text as count from quote_requests ${where}`, params),
+      queryRows<{ count: number }>(`select count(*) as count from quote_requests ${where}`, params),
     ]);
 
     return NextResponse.json({ requests: rows, total: Number(totals[0]?.count ?? 0), limit, offset });

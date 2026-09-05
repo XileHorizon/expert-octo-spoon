@@ -16,12 +16,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!idSchema.safeParse(id).success) return NextResponse.json({ error: "Invalid request id." }, { status: 422 });
 
   try {
-    const record = await queryOne("select * from quote_requests where id = $1", [id]);
+    const record = await queryOne("select * from quote_requests where id = ?", [id]);
     if (!record) return NextResponse.json({ error: "Request not found." }, { status: 404 });
 
     const [jobs, emails] = await Promise.all([
-      queryRows("select * from quote_jobs where quote_request_id = $1 order by created_at", [id]),
-      queryRows("select * from email_deliveries where quote_request_id = $1 order by created_at desc", [id]),
+      queryRows("select * from quote_jobs where quote_request_id = ? order by created_at", [id]),
+      queryRows("select * from email_deliveries where quote_request_id = ? order by created_at desc", [id]),
     ]);
 
     return NextResponse.json({ request: record, jobs, emails });
@@ -42,9 +42,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (!parsed.success) return NextResponse.json({ error: "Invalid status value." }, { status: 422 });
 
   try {
-    const updated = await queryOne("update quote_requests set status = $1 where id = $2 returning id, status, updated_at", [parsed.data.status, id]);
+    await query("update quote_requests set status = ? where id = ?", [parsed.data.status, id]);
+    const updated = await queryOne("select id, status, updated_at from quote_requests where id = ?", [id]);
     if (!updated) return NextResponse.json({ error: "Request not found." }, { status: 404 });
-    await query("insert into admin_activity_log(owner_id, action, entity_type, entity_id) values ($1,'status',$2,$3)", [auth.owner.id, "quote_requests", id]).catch(() => null);
+    await query("insert into admin_activity_log(owner_id, action, entity_type, entity_id) values (?,'status',?,?)", [auth.owner.id, "quote_requests", id]).catch(() => null);
     return NextResponse.json({ request: updated });
   } catch {
     return NextResponse.json({ error: "The status could not be updated." }, { status: 400 });

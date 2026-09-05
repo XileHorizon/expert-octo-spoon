@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Full-stack verification. Requires nothing external.
+ * Full-stack verification against the disposable MYSQL_TEST_URL database.
  *
  *   npm run verify:full
  *
- * Starts a throwaway PostgreSQL instance and a local SMTP sink, builds nothing
+ * Resets a dedicated MySQL 8 test database and starts a local SMTP sink, builds nothing
  * (uses `next dev`), then drives the real HTTP surface end to end:
  *
  *   health -> owner creation -> sign-in -> session -> catalog editing ->
@@ -15,20 +15,17 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import EmbeddedPostgres from "embedded-postgres";
 import { SMTPServer } from "smtp-server";
+import { openTestDatabase, loadLocalEnv } from "./mysql-test-helper.mjs";
 
-const PG_PORT = 55440;
 const SMTP_PORT = 32525;
 const APP_PORT = 35000 + (process.pid % 1000);
 const BASE = `http://127.0.0.1:${APP_PORT}`;
 
-let pg, smtp, app, dataDir, appEnvFile;
+let db, smtp, app, appEnvFile;
 let passes = 0, failures = 0;
 const inbox = [];
 
@@ -37,7 +34,6 @@ const PW_INITIAL = ["Initial", "Owner", "Pass", "9"].join("");
 const PW_WRONG   = ["Totally", "Wrong", "Pass", "1"].join("");
 const PW_NEW     = ["Rotated", "Owner", "Pass", "7"].join("");
 const PW_WEAK    = "short";
-const DB_SECRET  = ["verify", "only", "local"].join("-");
 
 const ok = (label) => { passes++; console.log(`  \x1b[32mPASS\x1b[0m  ${label}`); };
 const bad = (label, detail) => { failures++; console.log(`  \x1b[31mFAIL\x1b[0m  ${label}${detail ? ` — ${detail}` : ""}`); };
@@ -72,19 +68,9 @@ function pdf(name) {
 
 try {
   console.log("\n\x1b[1mPreparing an isolated environment\x1b[0m");
-  dataDir = await mkdtemp(path.join(tmpdir(), "spe-full-db-"));
-
-  // --- PostgreSQL ---------------------------------------------------------
-  const opts = { databaseDir: dataDir, user: "spe", port: PG_PORT, persistent: false };
-  opts["pass" + "word"] = DB_SECRET;
-  pg = new EmbeddedPostgres(opts);
-  await pg.initialise();
-  await pg.start();
-  await pg.createDatabase("ship_print_esell");
-  const db = pg.getPgClient("ship_print_esell");
-  await db.connect();
-  await db.query(readFileSync("db/schema.sql", "utf8"));
-  console.log("  PostgreSQL ready");
+  loadLocalEnv();
+  db = await openTestDatabase({ reset: true, seed: false });
+  console.log("  MySQL 8 test database ready");
 
   // --- SMTP sink ----------------------------------------------------------
   smtp = new SMTPServer({
@@ -100,12 +86,11 @@ try {
   console.log("  SMTP sink ready");
 
   // --- application --------------------------------------------------------
-  const dbUrl = `postgresql://spe:${DB_SECRET}@127.0.0.1:${PG_PORT}/ship_print_esell`;
   const env = {
     ...process.env,
     NODE_ENV: "development",
     PORT: String(APP_PORT),
-    DATABASE_URL: dbUrl,
+    MYSQL_URL: process.env.MYSQL_TEST_URL,
     APP_URL: BASE,
     SMTP_HOST: "127.0.0.1",
     SMTP_PORT: String(SMTP_PORT),
@@ -165,7 +150,7 @@ try {
   console.log("\n\x1b[1mOwner account\x1b[0m");
   const bcrypt = (await import("bcryptjs")).default;
   const hash = await bcrypt.hash(PW_INITIAL, 12);
-  await db.query("insert into owners(email,password_hash,active) values ($1,$2,true)", ["owner@example.test", hash]);
+  await db.query("insert into owners(email,password_hash,active) values (?,?,true)", ["owner@example.test", hash]);
   ok("owner account created");
 
   const badLogin = await call("/api/auth/login", {
@@ -481,9 +466,9 @@ try {
   const failedHandoff = await fetch(`${BASE}/api/quote-requests`, { method: "POST", body: failedForm });
   const failedHandoffBody = await json(failedHandoff);
   check("submission does not report success when SMTP rejects the handoff", failedHandoff.status === 502 && /could not be safely accepted/i.test(failedHandoffBody?.error ?? ""));
-  const failedRecord = await db.query("select status from quote_requests where idempotency_key=$1", [failedPayload.idempotencyKey]);
+  const failedRecord = await db.query("select status from quote_requests where idempotency_key=?", [failedPayload.idempotencyKey]);
   check("failed handoff is flagged for owner visibility", failedRecord.rows[0]?.status === "intake_failed");
-  const failedJobs = await db.query("select storage_path from quote_jobs where quote_request_id=(select id from quote_requests where idempotency_key=$1)", [failedPayload.idempotencyKey]);
+  const failedJobs = await db.query("select storage_path from quote_jobs where quote_request_id=(select id from quote_requests where idempotency_key=?)", [failedPayload.idempotencyKey]);
   check("failed handoff still creates no artwork archive", failedJobs.rows.every((row) => row.storage_path === null));
 
   await db.end();
@@ -493,9 +478,7 @@ try {
 } finally {
   if (app) { app.kill("SIGTERM"); await sleep(700); app.kill("SIGKILL"); }
   if (smtp) await new Promise((r) => smtp.close(r));
-  if (pg) await pg.stop().catch(() => {});
   if (appEnvFile) await rm(appEnvFile, { force: true }).catch(() => {});
-  if (dataDir) await rm(dataDir, { recursive: true, force: true }).catch(() => {});
 }
 
 const total = passes + failures;

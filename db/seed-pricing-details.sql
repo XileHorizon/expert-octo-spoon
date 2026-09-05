@@ -27,6 +27,16 @@ update materials set name='Business card stock', weight=coalesce(weight,'50 lb')
 update materials set name='Business card stock', weight=coalesce(weight,'100 lb'), category=coalesce(category,'Cover stock') where id='30000000-0000-4000-8000-000000000011' and name='100 lb';
 
 -- Mark the first mapped paper on each size as standard when none is marked.
-update size_papers sp set is_standard=true, surcharge=coalesce(surcharge,0)
-where sp.material_id=(select sp2.material_id from size_papers sp2 where sp2.size_id=sp.size_id and sp2.active order by sp2.sort_order,sp2.material_id limit 1)
-and not exists(select 1 from size_papers chosen where chosen.size_id=sp.size_id and chosen.is_standard);
+UPDATE size_papers sp
+JOIN (
+  SELECT size_id, material_id
+  FROM (
+    SELECT size_id, material_id,
+           ROW_NUMBER() OVER (PARTITION BY size_id ORDER BY sort_order, material_id) AS position,
+           MAX(is_standard) OVER (PARTITION BY size_id) AS has_standard
+    FROM size_papers
+    WHERE active = TRUE
+  ) ranked
+  WHERE position = 1 AND has_standard = 0
+) chosen ON chosen.size_id = sp.size_id AND chosen.material_id = sp.material_id
+SET sp.is_standard = TRUE, sp.surcharge = COALESCE(sp.surcharge, 0);

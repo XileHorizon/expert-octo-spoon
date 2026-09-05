@@ -1,51 +1,29 @@
 #!/usr/bin/env node
-/**
- * Applies the additive schema and required catalog seeds.
- *
- * Run through `npm run db:init`; package.json loads .env.local before this
- * process starts, so DATABASE_URL never needs to be pasted into a command.
- */
-
+/** Apply the rerunnable MySQL schema and required seeds using MYSQL_URL from .env.local. */
 import { readFile } from "node:fs/promises";
-import pg from "pg";
+import mysql from "mysql2/promise";
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
-  console.error("\nDATABASE_URL is missing. Copy .env.example to .env.local and configure it first.\n");
+const mysqlUrl = process.env.MYSQL_URL;
+if (!mysqlUrl) {
+  console.error("\nMYSQL_URL is missing. Run npm run setup:local or configure .env.local first.\n");
   process.exit(1);
 }
 
-const files = [
-  "db/schema.sql",
-  "db/seed-required-catalog.sql",
-  "db/seed-pricing-details.sql",
-];
-
-const pool = new pg.Pool({
-  connectionString: databaseUrl,
-  ssl: process.env.DATABASE_SSL === "true"
-    ? { rejectUnauthorized: false }
-    : undefined,
-});
-
-const client = await pool.connect().catch((error) => {
-  console.error(`\nCould not connect to PostgreSQL: ${error.message}\n`);
-  process.exit(1);
-});
-
+const files = ["db/schema.sql", "db/seed-required-catalog.sql", "db/seed-pricing-details.sql"];
+let connection;
 try {
-  await client.query("begin");
+  connection = await mysql.createConnection({ uri: mysqlUrl, multipleStatements: true, timezone: "Z", ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined });
+  await connection.beginTransaction();
   for (const file of files) {
     console.log(`Applying ${file}`);
-    await client.query(await readFile(file, "utf8"));
+    await connection.query(await readFile(file, "utf8"));
   }
-  await client.query("commit");
-  console.log("\nDatabase schema and required catalog are ready.\n");
+  await connection.commit();
+  console.log("\nMySQL schema and required catalog are ready.\n");
 } catch (error) {
-  await client.query("rollback").catch(() => undefined);
-  console.error(`\nDatabase initialization failed: ${error.message}\n`);
+  if (connection) await connection.rollback().catch(() => undefined);
+  console.error(`\nDatabase initialization failed: ${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;
 } finally {
-  client.release();
-  await pool.end();
+  if (connection) await connection.end();
 }
