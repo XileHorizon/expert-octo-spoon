@@ -16,22 +16,26 @@ Portable print-quote intake built with Next.js 16, Node.js 24, TypeScript, MySQL
 - `MAX_EMAIL_MESSAGE_BYTES` validates the estimated complete MIME message, including base64 overhead.
 - Provider acceptance means accepted for processing, not guaranteed inbox delivery.
 
-## Local macOS setup
+## Local setup (Windows, macOS, or Linux)
 
-Requires Node.js 24 and Homebrew. The guided setup detects Homebrew MySQL, creates separate app/test databases and a least-scope app user, writes `.env.local` mode `0600`, and never displays generated database credentials.
+Install Node.js 24 and Docker Desktop/Docker Engine, then run one guided command:
 
 ```bash
 npm install
-brew install mysql                 # once, if missing
-brew services start mysql          # once, if the daemon is not running
 npm run setup:local
-npm run create-owner -- owner@example.com
 npm run dev:local
 ```
 
-If Homebrew MySQL already runs, `npm run setup:local` is the only database setup command. `npm run dev:local` reruns the additive schema/seeds before starting Next.js.
+`setup:local` works the same on Windows, macOS, and Linux. It:
 
-For non-macOS development, create MySQL 8 databases for the app and tests, ensure the disposable test database name ends in `_test`, then set `MYSQL_URL` and `MYSQL_TEST_URL` in `.env.local` and run `npm run db:init`.
+1. reuses a working `MYSQL_URL` when one is already configured;
+2. otherwise starts a persistent private `mysql:8.4` Docker container;
+3. otherwise uses an installed native MySQL 8 server;
+4. creates isolated app/test databases and a least-scope app user;
+5. writes credentials to ignored mode-`0600` local files without displaying them;
+6. applies the schema/seeds and prompts for the first owner email/password.
+
+You can supply the owner email up front with `npm run setup:local -- owner@example.com`. The only remaining prerequisite is starting/installing Docker or native MySQL if neither is available; the script prints the exact platform-specific step. `npm run dev:local` reruns the additive schema/seeds before starting Next.js.
 
 ## Email portability
 
