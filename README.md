@@ -16,9 +16,20 @@ Portable print-quote intake built with Next.js 16, Node.js 24, TypeScript, MySQL
 - `MAX_EMAIL_MESSAGE_BYTES` validates the estimated complete MIME message, including base64 overhead.
 - Provider acceptance means accepted for processing, not guaranteed inbox delivery.
 
-## Local setup (Windows, macOS, or Linux)
+## Local UI development
 
-Install Node.js 24 and Docker Desktop/Docker Engine, then run one guided command:
+If you are working on the public-facing UI, you do **not** need MySQL, Docker, email, or an owner account:
+
+```bash
+npm install
+npm run dev:ui
+```
+
+Open <http://localhost:3000>. The public quote form uses the built-in fixture catalog, so layout, styling, responsive behavior, and most form interactions work immediately. Database-backed submission and the owner portal are intentionally unavailable in this mode.
+
+## Full local setup (Windows, macOS, or Linux)
+
+Use the full setup only when you need database-backed quote submission, admin features, or integration tests. Install Node.js 24 and Docker Desktop/Docker Engine, then run:
 
 ```bash
 npm install
@@ -64,4 +75,4 @@ npm run build
 
 The MySQL suites fail with a clear prerequisite message when `MYSQL_TEST_URL` is absent, unreachable, not MySQL 8, or does not end in `_test`; they never substitute a mock database.
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for GoDaddy cPanel and VPS deployment.
+Start with the human-run [deployment handbook](DEPLOYMENT-HANDBOOK.md) to qualify the customer's hosting, collect access, stage, launch, verify, roll back, and hand off. Use [DEPLOYMENT.md](DEPLOYMENT.md) as the lower-level technical reference only after the hosting plan passes qualification.

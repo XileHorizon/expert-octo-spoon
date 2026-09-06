@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:ui": "next dev",
     "dev:local": "npm run db:init && next dev",
     "setup:local": "node scripts/setup-local.mjs",
     "build": "next build",
@@ -18,7 +19,8 @@
     "deploy": "bash scripts/deploy.sh",
     "verify:full": "node scripts/verify-full.mjs",
     "verify:ops": "node scripts/verify-ops.mjs",
-    "verify:all": "npm run typecheck && npm run lint && npm test && npm run verify:e2e && npm run verify:ops && npm run verify:full && npm run build"
+    "verify:all": "npm run typecheck && npm run lint && npm test && npm run verify:e2e && npm run verify:ops && npm run verify:full && npm run build",
+    "rehearse:deploy": "npm run db:init && npm run verify:all"
   },
   "dependencies": {
     "@types/bcryptjs": "^2.4.6",

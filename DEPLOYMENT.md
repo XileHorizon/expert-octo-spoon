@@ -1,8 +1,28 @@
-# Production deployment
+# Production deployment technical reference
 
-Requirements: Node.js **24**, MySQL **8**, a writable application directory, an SMTP provider or Gmail API token file, and HTTPS.
+Start with [DEPLOYMENT-HANDBOOK.md](DEPLOYMENT-HANDBOOK.md). It is the qualification-first, human-run procedure for selecting hosting, collecting access, staging, launch, rollback, and customer handoff.
 
-## GoDaddy cPanel: MySQL and Node 24
+Requirements: Node.js **24**, MySQL **8**, a writable application directory, an SMTP provider or Gmail API token file, and HTTPS. **Do not assume ordinary GoDaddy cPanel satisfies these requirements:** qualify the customer's exact plan before following any provider-specific steps below.
+
+## Rehearse locally before touching production
+
+Start the full local environment, then run the same schema, validation, integration, email-handoff, and production-build gates used to judge a release:
+
+```bash
+npm run dev:local
+# In a second terminal:
+npm run rehearse:deploy
+```
+
+A successful rehearsal ends with the production build passing after the complete 78-check HTTP workflow. It uses only the disposable database named by `MYSQL_TEST_URL`; the verification scripts refuse a test database whose name does not end in `_test`.
+
+Then manually practice the operator flow at <http://localhost:3000/admin/login>: sign in, edit pricing, submit a quote through the public form, find it in the owner portal, change its status, test password recovery, and sign out. Local credentials belong in ignored private files, never in deployment commands or committed configuration.
+
+This rehearses the application release. The final hosting exercise still requires the cPanel or VPS-specific steps below, including HTTPS, the real mail provider, process restart, backups, and a production health check.
+
+## GoDaddy cPanel: provisional path only
+
+GoDaddy's published standard cPanel component list currently documents MySQL 5.6/5.7 and does not establish Node 24 support. Use this section only if GoDaddy confirms that the customer's exact plan supplies Node 24, MySQL 8, persistent application processes, environment variables, and the required upload limits.
 
 1. In **cPanel → MySQL Databases**, create a database and database user. cPanel normally prefixes both names with the account name.
 2. Add the user to the database with **All Privileges**. Do not reuse the cPanel account password.
