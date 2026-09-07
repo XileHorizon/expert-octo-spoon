@@ -20,9 +20,64 @@ body {
   font-family: var(--font-family-body);
 }
 
-button,input,select,textarea {
+.brandmark {
+  width: fit-content;
+  height: auto;
+  object-fit: cover;
+}
+
+.portal-account small {
+  font-size: var(--font-size-sm);
+  line-height: 15px;
+  color: var(--color-page);
+}
+.portal-account p {
+  font-size: var(--font-size-base);
+  line-height: 17px;
+  color: var(--color-page);
+  margin: 0;
+}
+
+.portal-account {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-6) 0;
+}
+
+input,select,textarea {
   font: inherit;
   color: inherit;
+}
+
+button {
+  grid-column: 1/-1;
+  justify-self: start;
+  border: 0;
+  background: var(--color-brand);
+  color: var(--color-surface);
+  border-radius: var(--radius-sm);
+  padding: 13px 22px;
+  font-weight: 800;
+  cursor: pointer;
+}
+button:hover {
+  grid-column: 1/-1;
+  justify-self: start;
+  border: 0;
+  background: var(--color-brand-hover);
+  color: var(--color-surface);
+  border-radius: var(--radius-sm);
+  padding: 13px 22px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.sidebar-label {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  color: var(--color-page);
+  margin: var(--space-6) 0 var(--space-2);
 }
 
 /* Customer quote builder */
@@ -963,7 +1018,7 @@ button,input,select,textarea {
 
 .admin-warning {
   padding: var(--space-4);
-  margin: var(--space-6) 0;
+  margin-bottom: var(--space-6);
   background: var(--color-surface)1c8;
   border: 1px solid var(--color-admin-warning-border);
   border-radius: var(--radius-md);
@@ -1399,7 +1454,8 @@ button,input,select,textarea {
 }
 
 .admin-panel {
-  margin-top: 22px;
+  margin: var(--space-6);
+
 }
 
 .admin-loading {
@@ -1762,6 +1818,17 @@ button,input,select,textarea {
   justify-self: start;
   border: 0;
   background: var(--color-admin-accent);
+  color: var(--color-surface);
+  border-radius: var(--radius-sm);
+  padding: 13px 22px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.settings-form .save:hover {
+  grid-column: 1/-1;
+  justify-self: start;
+  border: 0;
+  background: var(--color-brand-hover);
   color: var(--color-surface);
   border-radius: var(--radius-sm);
   padding: 13px 22px;
@@ -2199,6 +2266,7 @@ button,input,select,textarea {
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
+  margin: var(--space-3) 0;
 }
 
 .portal-card+.portal-card {
@@ -2219,6 +2287,14 @@ button,input,select,textarea {
   font-size: var(--font-size-md);
 }
 
+.portal-subnav {
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-size-md);
+  color: var(--color-portal-muted);
+  gap: var(--space-1);
+  display: flex;
+  flex-wrap: wrap; 
+}
 .portal-subhead {
   margin: 0;
   font-size: var(--font-size-xl);
@@ -2456,6 +2532,23 @@ button.primary:disabled,.portal-actions button:disabled,.portal-inline-add butto
   padding: var(--space-3);
   cursor: pointer;
   text-align: left;
+  grid-column: auto;
+  justify-self: auto;
+}
+
+.size-option:hover {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  border: 1px solid var(--color-brand-hover);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  padding: var(--space-3);
+  cursor: pointer;
+  text-align: left;
+  grid-column: auto;
+  justify-self: auto;
 }
 
 .size-option.active {
@@ -2706,7 +2799,7 @@ button.primary:disabled,.portal-actions button:disabled,.portal-inline-add butto
 
 .admin-shell.admin-pricing-mode {
   max-width: none;
-  padding: 30px 0 0;
+  padding: 0 0 0;
 }
 
 .admin-pricing-mode>.admin-head,.admin-pricing-mode>.admin-tabs {
