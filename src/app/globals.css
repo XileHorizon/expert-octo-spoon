@@ -21,9 +21,11 @@ body {
 }
 
 .brandmark {
-  width: fit-content;
+  display: block;
+  width: 100%;
+  max-width: 270px;
   height: auto;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .portal-account small {
@@ -45,14 +47,13 @@ body {
   margin: var(--space-6) 0;
 }
 
-input,select,textarea {
+button,input,select,textarea {
   font: inherit;
   color: inherit;
 }
 
-button {
-  grid-column: 1/-1;
-  justify-self: start;
+.portal-account button {
+  align-self: flex-start;
   border: 0;
   background: var(--color-brand);
   color: var(--color-surface);
@@ -61,16 +62,19 @@ button {
   font-weight: 800;
   cursor: pointer;
 }
-button:hover {
-  grid-column: 1/-1;
-  justify-self: start;
-  border: 0;
+
+.portal-account button:hover {
   background: var(--color-brand-hover);
-  color: var(--color-surface);
-  border-radius: var(--radius-sm);
-  padding: 13px 22px;
-  font-weight: 800;
-  cursor: pointer;
+}
+
+.portal-account button:focus-visible {
+  outline: 2px solid var(--color-surface);
+  outline-offset: 2px;
+}
+
+.portal-account button:disabled {
+  opacity: .6;
+  cursor: not-allowed;
 }
 
 .sidebar-label {
@@ -98,10 +102,9 @@ button:hover {
 }
 
 .quote-header>img {
-  object-fit: cover;
-  width: fit-content;
-  height: 56px;
-  object-fit: cover;
+  flex: 0 1 270px;
+  width: min(270px,65vw);
+  max-height: 56px;
 }
 
 .quote-header p {
@@ -2119,6 +2122,11 @@ button:hover {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
+}
+
+.portal-brand .brandmark {
+  max-width: 100%;
 }
 
 .portal-brand span {
@@ -2500,6 +2508,11 @@ button:hover {
   cursor: pointer;
 }
 
+.portal-inline-add button:hover:not(:disabled),.portal-actions button:hover:not(:disabled) {
+  border-color: var(--color-portal-brand);
+  background: var(--color-portal-page);
+}
+
 button.primary {
   background: var(--color-portal-brand);
   border: 1px solid var(--color-portal-brand);
@@ -2508,6 +2521,16 @@ button.primary {
   padding: 10px var(--space-4);
   font-size: var(--font-size-md);
   cursor: pointer;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--color-brand-hover);
+  border-color: var(--color-brand-hover);
+}
+
+button.primary:focus-visible,.portal-actions button:focus-visible,.portal-inline-add button:focus-visible,.size-option:focus-visible,.portal-row-actions .link:focus-visible {
+  outline: 2px solid var(--color-portal-brand);
+  outline-offset: 2px;
 }
 
 button.primary:disabled,.portal-actions button:disabled,.portal-inline-add button:disabled {

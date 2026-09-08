@@ -9,30 +9,8 @@ import {
 import { priceJob } from "@/lib/pricing";
 import { draftToCatalog, type PaperDraft, type PricingDraftState, type SizeDraft } from "@/lib/pricing-draft";
 
-
-
-export type PricingSection =
-  | "papers"
-  | "sizes"
-  | "options"
-  | "discounts";type Loaded = { draft: PricingDraftState; inUse: { papers: string[]; sizes: string[] } };
-
-const SECTIONS: { id: Section; label: string; icon: string }[] = [
-  { id: "papers", label: "Paper types", icon: "file" },
-  { id: "sizes", label: "Sizes & pricing", icon: "tag" },
-  { id: "options", label: "Print options & finishing", icon: "sliders" },
-  { id: "discounts", label: "Bulk discounts", icon: "percent" },
-];
-
-const Icon = ({ name }: { name: string }) => {
-  const paths: Record<string, React.ReactNode> = {
-    file: <><path d="M8.75 1.25H3.75a1.25 1.25 0 0 0-1.25 1.25v10a1.25 1.25 0 0 0 1.25 1.25h7.5a1.25 1.25 0 0 0 1.25-1.25V5z"/><path d="M8.75 1.25V5h3.75"/></>,
-    tag: <><path d="m13.4 8.1-5.3 5.3a1.2 1.2 0 0 1-1.7 0L1.7 8.7V1.7h7l4.7 4.7a1.2 1.2 0 0 1 0 1.7z"/><circle cx="4.7" cy="4.7" r="0.9"/></>,
-    sliders: <><path d="M2.5 12.5v-4M2.5 5.5v-4M7.5 12.5v-6M7.5 3.5v-2M12.5 12.5v-3M12.5 6.5v-5M1 8.5h3M6 3.5h3M11 9.5h3"/></>,
-    percent: <><path d="M13 2 3 13"/><circle cx="4.2" cy="4.2" r="1.7"/><circle cx="11.8" cy="10.8" r="1.7"/></>,
-  };
-  return <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
-};
+export type PricingSection = "papers" | "sizes" | "options" | "discounts";
+type Loaded = { draft: PricingDraftState; inUse: { papers: string[]; sizes: string[] } };
 
 const money = (value: string | null) => value === null ? "—" : `$${new Decimal(value).toDecimalPlaces(2).toFixed(2)}`;
 const paperLabel = (paper: { name: string; weight: string | null }) => [paper.name, paper.weight].filter(Boolean).join(" · ");
@@ -181,10 +159,22 @@ export function AdminPricing({
     </div>
 
     <div className="portal-toolbar">
-      {/* existing toolbar */}
+      <div>
+        <span className={dirty ? "chip warn" : "chip ok"}>
+          {dirty ? "Unsaved changes" : savedAt ? "Saved just now" : "No changes"}
+        </span>
+        <small>Public prices change only after saving</small>
+      </div>
+      <div className="portal-actions">
+        <button type="button" onClick={revert} disabled={!dirty || saving}>Cancel</button>
+        <button type="button" className="primary" onClick={() => void save()} disabled={!dirty || saving}>
+          {saving ? "Saving…" : "Save changes"}
+        </button>
+      </div>
     </div>
   </>
-);
+  );
+}
 
 function PapersScreen({ draft, inUse, update }: { draft: PricingDraftState; inUse: string[]; update: (fn: (current: PricingDraftState) => PricingDraftState) => void }) {
   const [editing, setEditing] = useState<string | null>(null);
@@ -452,4 +442,4 @@ function QuotePreview({ draft, sizeId }: { draft: PricingDraftState; sizeId: str
       <p><span>Customer sees</span><strong>${result.subtotal}</strong></p>
     </div> : <div className="preview-result manual"><p><span>Customer sees</span><strong>Manual quote</strong></p><small>{result?.reason ?? "Select a size and paper."}</small></div>}
   </div>;
-}}
+}
