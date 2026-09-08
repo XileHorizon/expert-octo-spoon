@@ -9,6 +9,7 @@ import { priceQuote } from "@/lib/pricing";
 import { patchItemById, toggleExpandedId } from "@/lib/quote-state";
 import type { Catalog, QuoteJobInput } from "@/lib/types";
 import { ALLOWED_MIME_TYPES, MAX_FILE_BYTES, MAX_FILES, MAX_TOTAL_BYTES, estimateEncodedEmailBytes, maxRawBytesForEmail } from "@/lib/validation";
+import shipesel from "@/app/SVG/shipesel.svg";
 
 type LocalJob = QuoteJobInput & { file: File };
 type Customer = { name: string; email: string; organization: string; phone: string };
@@ -178,7 +179,7 @@ export function QuoteBuilder({ initialCatalog, maxEmailBytes }: { initialCatalog
   const manualItems = jobs.filter((_, index) => pricing.items[index]?.status === "manual");
 
   return <main className="quote-page">
-    <header className="quote-header"><Image src={asset("ship-print-esell-logo.png")} width={270} height={56} alt="Ship Print eSell" priority unoptimized/><p>Need help? Call <a href="tel:6144591205">(614) 459-1205</a></p></header>
+    <header className="quote-header"><Image className="brandmark" src={shipesel} alt="Ship Print eSell" priority unoptimized/><p>Need help? Call <a href="tel:6144591205">(614) 459-1205</a></p></header>
     <form className="quote-layout" onSubmit={submit}>
       <div className="quote-column">
         <div className="quote-intro"><h1>Custom Print Quote Builder</h1><p>Upload each file and configure its print specifications independently. We’ll review the complete request before confirming final pricing.</p></div>

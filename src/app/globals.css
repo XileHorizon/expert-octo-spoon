@@ -98,8 +98,8 @@ button:hover {
 }
 
 .quote-header>img {
-  display: block;
-  width: 270px;
+  object-fit: cover;
+  width: fit-content;
   height: 56px;
   object-fit: cover;
 }
