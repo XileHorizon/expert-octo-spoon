@@ -15,6 +15,20 @@ CREATE TABLE IF NOT EXISTS owners (
   UNIQUE KEY owners_email_unique (email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS owner_setup_state (
+  id TINYINT NOT NULL DEFAULT 1 CHECK (id = 1),
+  completed_at DATETIME(3) NULL,
+  owner_id CHAR(36) NULL,
+  PRIMARY KEY (id),
+  CONSTRAINT owner_setup_state_owner_fk FOREIGN KEY (owner_id) REFERENCES owners(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+INSERT IGNORE INTO owner_setup_state(id) VALUES (1);
+UPDATE owner_setup_state
+   SET completed_at = COALESCE(completed_at, UTC_TIMESTAMP(3)),
+       owner_id = COALESCE(owner_id, (SELECT id FROM owners ORDER BY created_at LIMIT 1))
+ WHERE id = 1 AND EXISTS (SELECT 1 FROM owners);
+
 CREATE TABLE IF NOT EXISTS owner_sessions (
   token_hash CHAR(64) NOT NULL,
   owner_id CHAR(36) NOT NULL,
@@ -36,6 +50,24 @@ CREATE TABLE IF NOT EXISTS owner_password_resets (
   KEY owner_resets_owner_idx (owner_id),
   KEY owner_resets_expiry_idx (expires_at),
   CONSTRAINT owner_resets_owner_fk FOREIGN KEY (owner_id) REFERENCES owners(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS owner_password_reset_deliveries (
+  id CHAR(36) NOT NULL DEFAULT (UUID()),
+  owner_id CHAR(36) NOT NULL,
+  status ENUM('queued','processing','delivered','failed') NOT NULL DEFAULT 'queued',
+  attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+  available_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  locked_until DATETIME(3) NULL,
+  provider_message_id VARCHAR(1024) NULL,
+  last_error TEXT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  delivered_at DATETIME(3) NULL,
+  PRIMARY KEY (id),
+  KEY owner_reset_deliveries_ready_idx (status, available_at),
+  KEY owner_reset_deliveries_owner_idx (owner_id),
+  CONSTRAINT owner_reset_deliveries_owner_fk FOREIGN KEY (owner_id) REFERENCES owners(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS products (
@@ -170,7 +202,9 @@ CREATE TABLE IF NOT EXISTS quote_requests (
   fulfillment_name VARCHAR(255) NULL,
   pricing_status ENUM('priced','manual') NOT NULL,
   calculated_total DECIMAL(14,2) NULL,
-  status ENUM('received','intake_failed','reviewing','quoted','closed') NOT NULL,
+  calculated_subtotal DECIMAL(14,2) NULL,
+  minimum_order_adjustment DECIMAL(14,2) NULL,
+  status ENUM('request_received','quote_sent','in_progress','awaiting_payment','fulfilled') NOT NULL DEFAULT 'request_received',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
@@ -207,6 +241,8 @@ CREATE TABLE IF NOT EXISTS quote_jobs (
   storage_path VARCHAR(768) NULL,
   pricing_status ENUM('priced','manual') NOT NULL,
   calculated_subtotal DECIMAL(14,2) NULL,
+  color_adjustment DECIMAL(14,2) NOT NULL DEFAULT 0,
+  orientation_adjustment DECIMAL(14,2) NOT NULL DEFAULT 0,
   pricing_reason TEXT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
@@ -221,12 +257,17 @@ CREATE TABLE IF NOT EXISTS quote_jobs (
 CREATE TABLE IF NOT EXISTS email_deliveries (
   id CHAR(36) NOT NULL DEFAULT (UUID()),
   quote_request_id CHAR(36) NOT NULL,
+  attempt_sequence BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  delivery_type ENUM('shop_notification','customer_confirmation') NOT NULL DEFAULT 'shop_notification',
+  recipient VARCHAR(320) NULL,
   status ENUM('not_configured','queued','provider_accepted','failed') NOT NULL,
   provider_message_id VARCHAR(1024) NULL,
   error_message TEXT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
+  UNIQUE KEY email_deliveries_attempt_unique (attempt_sequence),
   KEY email_deliveries_request_idx (quote_request_id),
+  KEY email_deliveries_request_type_idx (quote_request_id, delivery_type),
   CONSTRAINT email_deliveries_request_fk FOREIGN KEY (quote_request_id) REFERENCES quote_requests(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -239,6 +280,11 @@ CREATE TABLE IF NOT EXISTS business_settings (
   rush_turnaround TEXT NOT NULL,
   support_copy TEXT NOT NULL,
   notification_target VARCHAR(320) NULL,
+  minimum_order_total DECIMAL(14,2) NOT NULL DEFAULT 0 CHECK (minimum_order_total >= 0),
+  color_adjustment DECIMAL(14,4) NOT NULL DEFAULT 0 CHECK (color_adjustment >= 0),
+  black_white_adjustment DECIMAL(14,4) NOT NULL DEFAULT 0 CHECK (black_white_adjustment >= 0),
+  portrait_adjustment DECIMAL(14,4) NOT NULL DEFAULT 0 CHECK (portrait_adjustment >= 0),
+  landscape_adjustment DECIMAL(14,4) NOT NULL DEFAULT 0 CHECK (landscape_adjustment >= 0),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   updated_by CHAR(36) NULL,
   PRIMARY KEY (id),

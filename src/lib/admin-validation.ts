@@ -1,4 +1,5 @@
 import { z } from "zod";
+import Decimal from "decimal.js";
 
 export const adminTableSchema = z.enum(["products", "sizes", "materials", "bulk_tiers", "finishing_options"]);
 export type AdminTable = z.infer<typeof adminTableSchema>;
@@ -81,6 +82,13 @@ export const pricingDraftSchema = z.object({
   sizes: z.array(sizeDraftSchema).max(200),
   finishing: z.array(finishingDraftSchema).max(200),
   bulk_tiers: z.array(bulkTierDraftSchema).max(200),
+  minimum_order_total: z.string().regex(/^\d+(\.\d{1,2})?$/).default("0.00"),
+  mode_adjustments: z.object({
+    color: money.unwrap(),
+    black_white: money.unwrap(),
+    portrait: money.unwrap(),
+    landscape: money.unwrap(),
+  }).strict().default({ color: "0", black_white: "0", portrait: "0", landscape: "0" }),
 }).strict().superRefine((draft, ctx) => {
   const paperIds = new Set(draft.papers.filter((paper) => paper.id).map((paper) => paper.id));
   for (const size of draft.sizes) {
@@ -98,7 +106,7 @@ export const pricingDraftSchema = z.object({
 
 export type PricingDraft = z.infer<typeof pricingDraftSchema>;
 
-export const requestStatusSchema = z.enum(["received", "intake_failed", "reviewing", "quoted", "closed"]);
+export const requestStatusSchema = z.enum(["request_received", "quote_sent", "in_progress", "awaiting_payment", "fulfilled"]);
 
 export const businessSettingsSchema = z.object({
   contact_phone: z.string().trim().min(1).max(40),
@@ -108,6 +116,15 @@ export const businessSettingsSchema = z.object({
   rush_turnaround: z.string().trim().min(1).max(100),
   support_copy: z.string().trim().min(1).max(200),
   notification_target: z.string().email().max(254).nullable(),
+  minimum_order_total: z.string()
+    .regex(/^\d+(\.\d{1,2})?$/, "Use a non-negative amount with up to two decimal places.")
+    .refine((value) => {
+      try { return new Decimal(value).lessThanOrEqualTo("999999999999.99"); } catch { return false; }
+    }, "Minimum order total is too large."),
+  color_adjustment: money.unwrap(),
+  black_white_adjustment: money.unwrap(),
+  portrait_adjustment: money.unwrap(),
+  landscape_adjustment: money.unwrap(),
 }).strict();
 
 export type BusinessSettings = z.infer<typeof businessSettingsSchema>;
@@ -119,4 +136,9 @@ export const defaultBusinessSettings: BusinessSettings = {
   rush_turnaround: "1-2 Business Days",
   support_copy: "Need help?",
   notification_target: null,
+  minimum_order_total: "0.00",
+  color_adjustment: "0.0000",
+  black_white_adjustment: "0.0000",
+  portrait_adjustment: "0.0000",
+  landscape_adjustment: "0.0000",
 };

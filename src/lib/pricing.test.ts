@@ -14,7 +14,8 @@ const letter = {
 const poster = { ...letter, id: "poster", name: "Poster", basePrice: null, manualQuote: true, papers: [{ ...letter.papers[0] }] };
 
 const catalog: Catalog = {
-  fixtureMode: false, placeholderNotice: null, papers: [],
+  fixtureMode: false, placeholderNotice: null, minimumOrderTotal: "0.00", papers: [],
+  modeAdjustments: { color: "0", blackWhite: "0", portrait: "0", landscape: "0" },
   products: [{ id: "p", name: "P", description: "", active: true, minimumQuantity: 1, sizes: [letter, poster] }],
   finishing: [
     { id: "fold", name: "Folding", unitPrice: "0.04", chargeBasis: "per_piece", sizeIds: ["letter"], active: true },
@@ -44,6 +45,20 @@ describe("pricing", () => {
 
   it("adds the paper surcharge over the base price", () => {
     expect(priceJob({ ...job, materialId: "gloss" }, catalog).subtotal).toBe("2.80");
+  });
+
+  it("applies selected color and orientation surcharges per billing unit", () => {
+    const adjusted = { ...catalog, modeAdjustments: { color: "0.05", blackWhite: "0.01", portrait: "0", landscape: "0.02" } };
+    const priced = priceJob({ ...job, quantity: 10, colorMode: "color", orientation: "landscape" }, adjusted);
+    expect(priced.subtotal).toBe("2.70");
+    expect(priced.lines).toEqual(expect.arrayContaining([
+      { label: "Full color adjustment", amount: "0.50" },
+      { label: "Landscape adjustment", amount: "0.20" },
+    ]));
+  });
+
+  it("keeps existing prices unchanged when every mode adjustment is zero", () => {
+    expect(priceJob({ ...job, colorMode: "black-white", orientation: "landscape" }, catalog).subtotal).toBe("2.00");
   });
 
   it("bills double-sided as two printed pages", () => {
@@ -96,5 +111,32 @@ describe("pricing", () => {
     expect(priced.lines.map((line) => line.label)).toEqual([
       "Letter printing", "Gloss Paper paper", "Bulk discount (10% off)", "File setup",
     ]);
+  });
+
+  it("adds the exact difference below the minimum order total", () => {
+    const priced = priceQuote([job], { ...catalog, minimumOrderTotal: "10.00" });
+    expect(priced).toMatchObject({
+      status: "priced",
+      subtotal: "2.00",
+      minimumOrderAdjustment: "8.00",
+      total: "10.00",
+      lines: [{ label: "Minimum order adjustment", amount: "8.00" }],
+    });
+  });
+
+  it.each(["2.00", "1.99"])("does not adjust a quote at or above a %s minimum", (minimumOrderTotal) => {
+    const priced = priceQuote([job], { ...catalog, minimumOrderTotal });
+    expect(priced).toMatchObject({ minimumOrderAdjustment: null, total: "2.00", lines: [] });
+  });
+
+  it("applies the minimum after bulk discounts", () => {
+    const priced = priceQuote([{ ...job, quantity: 100 }], { ...catalog, minimumOrderTotal: "20.00" });
+    // 100 x $0.20 less 5% = $19.00, then a $1.00 order adjustment.
+    expect(priced).toMatchObject({ subtotal: "19.00", minimumOrderAdjustment: "1.00", total: "20.00" });
+  });
+
+  it("never applies the minimum to a quote containing a manual item", () => {
+    const priced = priceQuote([job, { ...job, clientId: "manual", sizeId: "poster" }], { ...catalog, minimumOrderTotal: "100.00" });
+    expect(priced).toMatchObject({ status: "manual", total: null, subtotal: null, minimumOrderAdjustment: null, lines: [] });
   });
 });

@@ -51,7 +51,7 @@ export async function GET() {
   const auth = await requireApprovedOwner();
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
   try {
-    const [papers, sizes, sizePapers, finishing, finishingSizes, tiers, tierSizes, usage] = await Promise.all([
+    const [papers, sizes, sizePapers, finishing, finishingSizes, tiers, tierSizes, usage, settings] = await Promise.all([
       queryRows("select id,name,weight,category,active,sort_order from materials order by sort_order, name"),
       queryRows<SizeRow>("select id,product_id,name,dimensions,base_price,billing_unit,minimum_quantity,manual_quote,included_note,active,sort_order from sizes order by sort_order, name"),
       queryRows<{ size_id: string; material_id: string; surcharge: string | null; is_standard: boolean; active: boolean }>("select size_id,material_id,surcharge,is_standard,active from size_papers order by sort_order"),
@@ -60,12 +60,20 @@ export async function GET() {
       queryRows("select id,min_quantity,discount_percent,quantity_basis,active,sort_order from bulk_tiers order by min_quantity"),
       queryRows<{ tier_id: string; size_id: string }>("select tier_id,size_id from bulk_tier_sizes"),
       queryRows<{ material_id: string; size_id: string }>("select distinct material_id, size_id from quote_jobs"),
+      queryRows<{ minimum_order_total: string; color_adjustment: string; black_white_adjustment: string; portrait_adjustment: string; landscape_adjustment: string }>("select minimum_order_total,color_adjustment,black_white_adjustment,portrait_adjustment,landscape_adjustment from business_settings where id = 1"),
     ]);
     return NextResponse.json({
       papers,
       sizes: sizes.map((size) => ({ ...size, papers: sizePapers.filter((link) => link.size_id === size.id).map(({ material_id, surcharge, is_standard, active }) => ({ material_id, surcharge, is_standard, active })) })),
       finishing: finishing.map((option) => ({ ...option, size_ids: finishingSizes.filter((link) => link.finishing_id === option.id).map((link) => link.size_id) })),
       bulk_tiers: tiers.map((tier) => ({ ...tier, size_ids: tierSizes.filter((link) => link.tier_id === tier.id).map((link) => link.size_id) })),
+      minimum_order_total: settings[0]?.minimum_order_total ?? "0.00",
+      mode_adjustments: {
+        color: settings[0]?.color_adjustment ?? "0.0000",
+        black_white: settings[0]?.black_white_adjustment ?? "0.0000",
+        portrait: settings[0]?.portrait_adjustment ?? "0.0000",
+        landscape: settings[0]?.landscape_adjustment ?? "0.0000",
+      },
       in_use: { papers: [...new Set(usage.map((row) => row.material_id))], sizes: [...new Set(usage.map((row) => row.size_id))] },
     });
   } catch {
@@ -149,6 +157,11 @@ export async function PUT(request: Request) {
       }
       if (keptTiers.length) await client.query(`delete from bulk_tiers where id not in (${placeholders(keptTiers)})`, keptTiers);
       else await client.query("delete from bulk_tiers");
+
+      await client.query(
+        "update business_settings set minimum_order_total=?,color_adjustment=?,black_white_adjustment=?,portrait_adjustment=?,landscape_adjustment=?,updated_by=? where id=1",
+        [draft.minimum_order_total, draft.mode_adjustments.color, draft.mode_adjustments.black_white, draft.mode_adjustments.portrait, draft.mode_adjustments.landscape, auth.owner.id],
+      );
     });
   } catch (error) {
     if (error instanceof Error && error.message === "STALE") return NextResponse.json({ error: "Someone else changed this pricing. Reload before saving again." }, { status: 409 });

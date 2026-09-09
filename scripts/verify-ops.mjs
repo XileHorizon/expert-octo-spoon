@@ -22,6 +22,16 @@ try {
   check("expired session removed", !sessions.rows.some((row) => row.token_hash === "a".repeat(64)));
   check("live session preserved", sessions.rows.some((row) => row.token_hash === "b".repeat(64)));
   check("expired reset removed", Number((await db.query("select count(*) as n from owner_password_resets")).rows[0].n) === 0);
+  await db.query("insert into owner_password_reset_deliveries(id,owner_id,status) values (?,?, 'queued')", [randomUUID(), ownerId]);
+  let missingRecoveryConfigFailed = false;
+  try {
+    execFileSync("node", ["scripts/maintenance.mjs", "--apply"], {
+      env: { ...env, APP_URL: "", RESET_DELIVERY_WORKER_SECRET: "", MAINTENANCE_SKIP_ENV_FILE: "true" },
+      stdio: "pipe",
+    });
+  } catch { missingRecoveryConfigFailed = true; }
+  check("pending reset delivery is never silently dropped when recovery is unconfigured", missingRecoveryConfigFailed);
+  check("failed recovery leaves the durable reset delivery queued", (await db.query("select status from owner_password_reset_deliveries")).rows[0]?.status === "queued");
   let failed = false;
   try { execFileSync("node", ["scripts/maintenance.mjs", "--apply"], { env: { ...process.env, MYSQL_URL: "mysql://x@127.0.0.1:1/x" }, stdio: "pipe" }); } catch { failed = true; }
   check("unreachable database exits non-zero", failed);

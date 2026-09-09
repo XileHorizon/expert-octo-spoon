@@ -2,6 +2,10 @@
   "name": "ship-print-esell",
   "version": "0.1.0",
   "private": true,
+  "main": "next.config.ts",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "next dev",
     "dev:ui": "next dev",
@@ -9,9 +13,14 @@
     "setup:local": "node scripts/setup-local.mjs",
     "build": "next build",
     "start": "next start",
+    "package:godaddy": "node scripts/package-godaddy.mjs",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:integration": "node scripts/quote-intake.integration.mjs",
+    "test:all": "npm run typecheck && npm run lint && npm test && npm run test:integration && npm run test:e2e",
     "create-owner": "node scripts/create-owner.mjs",
     "db:init": "node --env-file-if-exists=.env.local scripts/init-db.mjs",
     "verify:e2e": "node scripts/verify-e2e.mjs",
@@ -24,6 +33,10 @@
   },
   "dependencies": {
     "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20",
+    "@types/nodemailer": "^8.0.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
     "bcryptjs": "^3.0.3",
     "decimal.js": "^10.6.0",
     "mysql2": "^3.24.3",
@@ -32,20 +45,17 @@
     "pdf-lib": "^1.17.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "typescript": "^5",
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.3",
-    "@types/node": "^20",
-    "@types/nodemailer": "^8.0.1",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "jsdom": "^26.1.0",
     "smtp-server": "^3.19.7",
-    "typescript": "^5",
     "vitest": "^3.2.7"
   }
 }

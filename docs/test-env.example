@@ -1,0 +1,14 @@
+# Reference only. Replace the placeholder locally; never commit credentials.
+# This file is not loaded automatically by Node. The database name MUST end in _test.
+MYSQL_TEST_URL=mysql://test_user:REPLACE_WITH_LOCAL_TEST_PASSWORD@127.0.0.1:3306/ship_print_esell_test
+
+# Optional values for manually starting the app against the disposable database.
+MYSQL_URL=mysql://test_user:REPLACE_WITH_LOCAL_TEST_PASSWORD@127.0.0.1:3306/ship_print_esell_test
+APP_URL=http://127.0.0.1:3000
+EMAIL_FROM=quotes@example.test
+QUOTE_NOTIFICATION_TO=shop@example.test
+SMTP_HOST=127.0.0.1
+SMTP_PORT=32525
+SMTP_SECURE=false
+NEXT_PUBLIC_ENABLE_DEMO_PRICING=false
+ENABLE_LOCAL_DEV_INTAKE=false

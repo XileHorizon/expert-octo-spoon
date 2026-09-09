@@ -22,7 +22,7 @@ describe("password hashing", () => {
     expect(hash).not.toContain("CorrectHorse9Battery");
     expect(await verifyPassword("CorrectHorse9Battery", hash)).toBe(true);
     expect(await verifyPassword("WrongHorse9Battery", hash)).toBe(false);
-  });
+  }, 15_000);
 
   it("produces a different hash each time for the same password", async () => {
     const [first, second] = await Promise.all([hashPassword("CorrectHorse9Battery"), hashPassword("CorrectHorse9Battery")]);

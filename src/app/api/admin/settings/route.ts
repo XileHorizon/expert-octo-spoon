@@ -32,9 +32,12 @@ export async function PUT(request: Request) {
       `update business_settings set
          contact_phone = ?, contact_email = ?, turnaround_intro = ?,
          standard_turnaround = ?, rush_turnaround = ?, support_copy = ?,
-         notification_target = ?, updated_by = ?
+         notification_target = ?, minimum_order_total = ?, color_adjustment = ?, black_white_adjustment = ?,
+         portrait_adjustment = ?, landscape_adjustment = ?, updated_by = ?
        where id = 1`,
-      [value.contact_phone, value.contact_email, value.turnaround_intro, value.standard_turnaround, value.rush_turnaround, value.support_copy, value.notification_target, auth.owner.id],
+      [value.contact_phone, value.contact_email, value.turnaround_intro, value.standard_turnaround, value.rush_turnaround, value.support_copy,
+        value.notification_target, value.minimum_order_total, value.color_adjustment, value.black_white_adjustment,
+        value.portrait_adjustment, value.landscape_adjustment, auth.owner.id],
     );
     if (result.affectedRows === 0) {
       const exists = await queryOne("select id from business_settings where id = 1");

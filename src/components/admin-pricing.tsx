@@ -6,7 +6,7 @@ import {
   BILLING_UNIT_LABELS, CHARGE_BASIS_LABELS, QUANTITY_BASIS_LABELS,
   type BillingUnit, type ChargeBasis, type QuantityBasis,
 } from "@/lib/types";
-import { priceJob } from "@/lib/pricing";
+import { priceQuote } from "@/lib/pricing";
 import { draftToCatalog, type PaperDraft, type PricingDraftState, type SizeDraft } from "@/lib/pricing-draft";
 
 export type PricingSection = "papers" | "sizes" | "options" | "discounts";
@@ -37,6 +37,11 @@ export function AdminPricing({
     if (!response.ok) return setError(data.error ?? "Pricing could not be loaded.");
     const next: PricingDraftState = {
       papers: data.papers, sizes: data.sizes, finishing: data.finishing, bulkTiers: data.bulk_tiers,
+      minimumOrderTotal: data.minimum_order_total ?? "0.00",
+      modeAdjustments: {
+        color: data.mode_adjustments?.color ?? "0.0000", blackWhite: data.mode_adjustments?.black_white ?? "0.0000",
+        portrait: data.mode_adjustments?.portrait ?? "0.0000", landscape: data.mode_adjustments?.landscape ?? "0.0000",
+      },
     };
     setLoaded({ draft: structuredClone(next), inUse: data.in_use });
     setDraft(next);
@@ -76,6 +81,11 @@ export function AdminPricing({
         }),
         finishing: draft.finishing,
         bulk_tiers: draft.bulkTiers,
+        minimum_order_total: draft.minimumOrderTotal,
+        mode_adjustments: {
+          color: draft.modeAdjustments.color, black_white: draft.modeAdjustments.blackWhite,
+          portrait: draft.modeAdjustments.portrait, landscape: draft.modeAdjustments.landscape,
+        },
       }),
     });
     const data = await response.json();
@@ -327,6 +337,18 @@ function OptionsScreen({ draft, update }: { draft: PricingDraftState; update: (f
   return <section>
     <header className="portal-heading"><h1>Print options &amp; finishing</h1><p>Set optional charges and where they apply.</p></header>
     <div className="portal-card">
+      <h2 className="portal-subhead">Color and orientation adjustments</h2>
+      <p className="portal-note">Optional surcharge per selected size billing unit. A zero keeps today&apos;s price unchanged; no mode is assumed to be the baseline.</p>
+      <div className="portal-fields">
+        {([
+          ["color", "Full color"], ["blackWhite", "Black & white"], ["portrait", "Portrait"], ["landscape", "Landscape"],
+        ] as const).map(([key, label]) => <label key={key}>{label} surcharge
+          <input aria-label={`${label} surcharge`} inputMode="decimal" value={draft.modeAdjustments[key]} onChange={(event) => update((current) => ({ ...current, modeAdjustments: { ...current.modeAdjustments, [key]: event.target.value } }))}/>
+          <small>Per billable unit (printed page, piece, card, or job).</small>
+        </label>)}
+      </div>
+    </div>
+    <div className="portal-card">
       <div className="portal-card-head">
         <div className="portal-legend"><p>Per piece = multiplied by printed item count</p><p>Per job = charged once</p></div>
         <button type="button" className="primary" onClick={() => update((current) => ({ ...current, finishing: [...current.finishing, { name: "New option", unit_price: null, charge_basis: "per_piece", size_ids: [], active: true, sort_order: current.finishing.length }] }))}>＋ Add option</button>
@@ -412,17 +434,20 @@ function QuotePreview({ draft, sizeId }: { draft: PricingDraftState; sizeId: str
   const [sides, setSides] = useState<1 | 2>(1);
   const [paperId, setPaperId] = useState("");
   const [finishingIds, setFinishingIds] = useState<string[]>([]);
+  const [colorMode, setColorMode] = useState<"color" | "black-white">("color");
+  const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
 
   const catalog = useMemo(() => draftToCatalog(draft), [draft]);
   const size = catalog.products[0]?.sizes.find((item) => item.id === sizeId);
   const paper = size?.papers.find((item) => item.materialId === paperId) ?? size?.papers[0];
   const available = catalog.finishing.filter((option) => option.sizeIds.length === 0 || option.sizeIds.includes(sizeId));
 
-  const result = size && paper ? priceJob({
+  const result = size && paper ? priceQuote([{
     clientId: "preview", fileName: "preview.pdf", fileSize: 1, mimeType: "application/pdf", pageCount: pages,
     productId: catalog.products[0].id, sizeId, materialId: paper.materialId, quantity, sides,
-    colorMode: "color", orientation: "portrait", finishingIds,
-  }, catalog) : null;
+    colorMode, orientation, finishingIds,
+  }], catalog) : null;
+  const item = result?.items[0];
 
   return <div className="portal-card preview-card">
     <h2 className="portal-subhead">Test a quote</h2>
@@ -432,14 +457,16 @@ function QuotePreview({ draft, sizeId }: { draft: PricingDraftState; sizeId: str
       <label>Pages per file<input type="number" min={1} value={pages} onChange={(event) => setPages(Math.max(1, Number(event.target.value) || 1))}/></label>
       <label>Sides<select value={sides} onChange={(event) => setSides(Number(event.target.value) === 2 ? 2 : 1)}><option value={1}>Single-sided</option><option value={2}>Double-sided</option></select></label>
       <label>Paper<select value={paper?.materialId ?? ""} onChange={(event) => setPaperId(event.target.value)}>{size?.papers.map((item) => <option key={item.materialId} value={item.materialId}>{item.name}</option>)}</select></label>
+      <label>Color<select value={colorMode} onChange={(event) => setColorMode(event.target.value as typeof colorMode)}><option value="color">Full color</option><option value="black-white">Black &amp; white</option></select></label>
+      <label>Orientation<select value={orientation} onChange={(event) => setOrientation(event.target.value as typeof orientation)}><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
     </div>
     {available.length > 0 && <div className="preview-finishing">{available.map((option) => <label key={option.id}>
       <input type="checkbox" checked={finishingIds.includes(option.id)} onChange={(event) => setFinishingIds(event.target.checked ? [...finishingIds, option.id] : finishingIds.filter((id) => id !== option.id))}/>
       {option.name}
     </label>)}</div>}
     {result?.status === "priced" ? <div className="preview-result">
-      <ul>{result.lines.map((line) => <li key={line.label}><span>{line.label}</span><b>{line.amount.startsWith("-") ? `−$${line.amount.slice(1)}` : `$${line.amount}`}</b></li>)}</ul>
-      <p><span>Customer sees</span><strong>${result.subtotal}</strong></p>
-    </div> : <div className="preview-result manual"><p><span>Customer sees</span><strong>Manual quote</strong></p><small>{result?.reason ?? "Select a size and paper."}</small></div>}
+      <ul>{[...(item?.lines ?? []), ...result.lines].map((line) => <li key={line.label}><span>{line.label}</span><b>{line.amount.startsWith("-") ? `−$${line.amount.slice(1)}` : `$${line.amount}`}</b></li>)}</ul>
+      <p><span>Customer sees</span><strong>${result.total}</strong></p>
+    </div> : <div className="preview-result manual"><p><span>Customer sees</span><strong>Manual quote</strong></p><small>{item?.reason ?? "Select a size and paper."}</small></div>}
   </div>;
 }

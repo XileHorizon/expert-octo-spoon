@@ -10,8 +10,19 @@ export async function GET() {
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   try {
-    const [requests, products, sizes, materials, finishing] = await Promise.all([
-      queryRows<{ status: string; pricing_status: string; created_at: Date }>("select status, pricing_status, created_at from quote_requests"),
+    const [requests, failedDeliveries, products, sizes, materials, finishing] = await Promise.all([
+      queryRows<{ id: string; status: string; pricing_status: string; created_at: Date }>("select id,status,pricing_status,created_at from quote_requests"),
+      queryRows<{ quote_request_id: string }>(
+        `select distinct e.quote_request_id
+           from email_deliveries e
+          where e.status <> 'provider_accepted'
+            and not exists (
+              select 1 from email_deliveries newer
+               where newer.quote_request_id=e.quote_request_id
+                 and newer.delivery_type=e.delivery_type
+                 and newer.attempt_sequence>e.attempt_sequence
+            )`,
+      ),
       queryRows<{ active: boolean }>("select active from products"),
       queryRows<{ active: boolean }>("select active from sizes"),
       queryRows<{ active: boolean; unit_price: string | null }>("select active, unit_price from materials"),
@@ -34,7 +45,10 @@ export async function GET() {
         last24h: requests.filter((row) => new Date(row.created_at).getTime() >= dayAgo).length,
         manualPricing: requests.filter((row) => row.pricing_status === "manual").length,
         byStatus,
-        needsAttention: (byStatus.received ?? 0) + (byStatus.intake_failed ?? 0),
+        needsAttention: new Set([
+          ...requests.filter((row) => row.status === "request_received").map((row) => row.id),
+          ...failedDeliveries.map((row) => row.quote_request_id),
+        ]).size,
       },
       catalog: {
         activeProducts: products.filter((row) => row.active).length,

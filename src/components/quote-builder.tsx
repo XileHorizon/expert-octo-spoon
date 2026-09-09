@@ -110,7 +110,7 @@ function FileConfiguration({ job, index, catalog, expanded, price, onToggle, onP
   </article>;
 }
 
-export function QuoteBuilder({ initialCatalog, maxEmailBytes }: { initialCatalog: Catalog; maxEmailBytes: number }) {
+export function QuoteBuilder({ initialCatalog, maxEmailBytes, contact }: { initialCatalog: Catalog; maxEmailBytes: number; contact: { phone: string; email: string } }) {
   const [catalog] = useState(initialCatalog);
   const [jobs, setJobs] = useState<LocalJob[]>([]);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -119,25 +119,30 @@ export function QuoteBuilder({ initialCatalog, maxEmailBytes }: { initialCatalog
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState<{ requestId: string; pricingStatus: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const submissionRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const pricing = useMemo(() => priceQuote(jobs, catalog), [jobs, catalog]);
   const totalBytes = jobs.reduce((sum, job) => sum + job.fileSize, 0);
   const effectiveCombinedCap = Math.min(MAX_TOTAL_BYTES, maxRawBytesForEmail(maxEmailBytes, Math.max(jobs.length, 1)));
+  const contactDetails = [contact.phone, contact.email].filter(Boolean).join(" or ");
+  const contactPrompt = contactDetails
+    ? `Please contact the print shop directly at ${contactDetails}.`
+    : "Please contact the print shop directly.";
 
   async function addFiles(list: FileList | File[]) {
     setError(""); setSuccess(null);
     const incoming = Array.from(list);
-    if (jobs.length + incoming.length > MAX_FILES) return setError(`You can submit up to ${MAX_FILES} files per request.`);
+    if (jobs.length + incoming.length > MAX_FILES) return setError(`You can submit up to ${MAX_FILES} files per request. ${contactPrompt}`);
     const nextTotal = totalBytes + incoming.reduce((sum, file) => sum + file.size, 0);
-    if (nextTotal > MAX_TOTAL_BYTES) return setError(`Adding those files would exceed the ${bytes(MAX_TOTAL_BYTES)} combined upload limit. Current files: ${bytes(totalBytes)}.`);
+    if (nextTotal > MAX_TOTAL_BYTES) return setError(`Adding those files would exceed the ${bytes(MAX_TOTAL_BYTES)} combined upload limit. Current files: ${bytes(totalBytes)}. ${contactPrompt}`);
     const encoded = estimateEncodedEmailBytes(nextTotal, jobs.length + incoming.length);
-    if (encoded > maxEmailBytes) return setError("Those files would exceed the email attachment limit after encoding. Reduce the submission size or contact the shop for another transfer method.");
+    if (encoded > maxEmailBytes) return setError(`Those files would exceed the email attachment limit after encoding. Reduce the submission size. ${contactPrompt}`);
 
     const product = catalog.products.find((item) => item.active);
     const size = product?.sizes.find((item) => item.active);
     if (!product || !size) return setError("No print sizes are available yet.");
     const accepted: LocalJob[] = [];
     for (const file of incoming) {
-      if (!ALLOWED_MIME_TYPES.has(file.type) || file.size > MAX_FILE_BYTES) { setError("Only PDF, PNG, and JPEG files up to 25 MB each are accepted."); continue; }
+      if (!ALLOWED_MIME_TYPES.has(file.type) || file.size > MAX_FILE_BYTES) { setError(`Only PDF, PNG, and JPEG files up to 25 MB each are accepted. ${contactPrompt}`); continue; }
       accepted.push({ file, clientId: createClientUuid(), fileName: file.name, fileSize: file.size, mimeType: file.type, pageCount: await pageCount(file), productId: product.id, sizeId: size.id, materialId: "", quantity: minimumForSize(size, product.minimumQuantity), sides: 1, colorMode: "color", orientation: "portrait", finishingIds: [], notes: "" });
     }
     if (accepted.length) {
@@ -164,13 +169,17 @@ export function QuoteBuilder({ initialCatalog, maxEmailBytes }: { initialCatalog
     }
 
     setBusy(true);
-    const idempotencyKey = createClientUuid();
-    const payload = { idempotencyKey, customer, jobs: jobs.map(({ file: _file, ...job }) => { void _file; return job; }) };
+    const requestJobs = jobs.map(({ file: _file, ...job }) => { void _file; return job; });
+    const fingerprint = JSON.stringify({ customer, jobs: requestJobs, files: jobs.map((job) => ({ lastModified: job.file.lastModified, name: job.file.name, size: job.file.size, type: job.file.type })) });
+    const idempotencyKey = submissionRef.current?.fingerprint === fingerprint ? submissionRef.current.key : createClientUuid();
+    submissionRef.current = { fingerprint, key: idempotencyKey };
+    const payload = { idempotencyKey, customer, jobs: requestJobs };
     const form = new FormData(); form.set("payload", JSON.stringify(payload)); jobs.forEach((job) => form.append("files", job.file, job.file.name));
     try {
       const response = await fetch("/api/quote-requests", { method: "POST", body: form, headers: { "Idempotency-Key": idempotencyKey } });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "The request could not be submitted.");
+      submissionRef.current = null;
       setSuccess({ requestId: data.requestId, pricingStatus: data.pricingStatus }); setJobs([]); setExpandedIds(new Set());
     } catch (caught) { setError(caught instanceof Error ? caught.message : "The request could not be submitted."); }
     finally { setBusy(false); }
@@ -179,7 +188,7 @@ export function QuoteBuilder({ initialCatalog, maxEmailBytes }: { initialCatalog
   const manualItems = jobs.filter((_, index) => pricing.items[index]?.status === "manual");
 
   return <main className="quote-page">
-    <header className="quote-header"><Image className="brandmark" src={shipesel} alt="Ship Print eSell" priority unoptimized/><p>Need help? Call <a href="tel:6144591205">(614) 459-1205</a></p></header>
+    <header className="quote-header"><Image className="brandmark" src={shipesel} alt="Ship Print eSell" priority unoptimized/><p>Need help? Call <a href={`tel:${contact.phone.replace(/[^+\d]/g, "")}`}>{contact.phone}</a></p></header>
     <form className="quote-layout" onSubmit={submit}>
       <div className="quote-column">
         <div className="quote-intro"><h1>Custom Print Quote Builder</h1><p>Upload each file and configure its print specifications independently. We’ll review the complete request before confirming final pricing.</p></div>
@@ -212,8 +221,8 @@ export function QuoteBuilder({ initialCatalog, maxEmailBytes }: { initialCatalog
       <aside className="quote-summary">
         <div className="summary-head"><h2>Your Quote Summary</h2><span>{jobs.length === 0 ? "DRAFT" : pricing.status === "priced" ? "ESTIMATE" : "REVIEW"}</span></div>
         <div className="summary-file-list">{jobs.length === 0 ? <p className="empty-summary">Upload a file to begin.</p> : jobs.map((job, index) => { const product = catalog.products.find((item) => item.id === job.productId); const size = product?.sizes.find((item) => item.id === job.sizeId); const material = size?.papers.find((item) => item.materialId === job.materialId); const item = pricing.items[index]; return <article key={job.clientId}><strong>{index + 1}. {job.fileName}</strong><p>{size?.name ?? "Size not selected"}</p><p>{job.quantity.toLocaleString("en-US")} • {material ? [material.name, material.weight].filter(Boolean).join(" ") : "Paper not selected"}</p><b>{item?.status === "priced" && item.subtotal ? currency(item.subtotal) : "Awaiting quote"}</b></article>; })}</div>
-        <div className="summary-price"><div><span>{jobs.length === 0 ? "Estimated Quote Total" : pricing.status === "manual" && Number(pricing.pricedSubtotal) > 0 ? "Priced items subtotal" : pricing.status === "priced" ? "Estimated Quote Total" : "Pricing"}</span><Icon name="info.svg" size={14}/></div>{jobs.length === 0 ? <p className="manual-total"><strong>—</strong></p> : pricing.status === "priced" ? <p><sup>$</sup><strong>{Number(pricing.total).toFixed(2)}</strong><b>USD</b></p> : Number(pricing.pricedSubtotal) > 0 ? <p><sup>$</sup><strong>{Number(pricing.pricedSubtotal).toFixed(2)}</strong><b>USD</b></p> : <p className="manual-total"><strong>Manual quote</strong></p>}{manualItems.length > 0 && <div className="manual-items"><strong>Awaiting a quote:</strong>{manualItems.map((job) => <span key={job.clientId}>{job.fileName}</span>)}</div>}<small>A partial subtotal is not a complete quote. Final pricing follows file review.</small></div>
-        <div className="summary-help"><p><Icon name="phone.svg" size={14}/> Instant assistance: (614) 459-1205</p><p><Icon name="mail.svg" size={14}/> support@shipprintesell.com</p></div>
+        <div className="summary-price"><div><span>{jobs.length === 0 ? "Estimated Quote Total" : pricing.status === "manual" && Number(pricing.pricedSubtotal) > 0 ? "Priced items subtotal" : pricing.status === "priced" ? "Estimated Quote Total" : "Pricing"}</span><Icon name="info.svg" size={14}/></div>{pricing.lines.map((line) => <div className="summary-adjustment" key={line.label}><span>{line.label}</span><strong>{currency(line.amount)}</strong></div>)}{jobs.length === 0 ? <p className="manual-total"><strong>—</strong></p> : pricing.status === "priced" ? <p><sup>$</sup><strong>{Number(pricing.total).toFixed(2)}</strong><b>USD</b></p> : Number(pricing.pricedSubtotal) > 0 ? <p><sup>$</sup><strong>{Number(pricing.pricedSubtotal).toFixed(2)}</strong><b>USD</b></p> : <p className="manual-total"><strong>Manual quote</strong></p>}{manualItems.length > 0 && <div className="manual-items"><strong>Awaiting a quote:</strong>{manualItems.map((job) => <span key={job.clientId}>{job.fileName}</span>)}</div>}<small>A partial subtotal is not a complete quote. Final pricing follows file review.</small></div>
+        <div className="summary-help"><p><Icon name="phone.svg" size={14}/> Instant assistance: {contact.phone}</p><p><Icon name="mail.svg" size={14}/> {contact.email}</p></div>
       </aside>
     </form>
   </main>;

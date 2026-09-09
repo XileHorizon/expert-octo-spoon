@@ -12,13 +12,28 @@ export function loadLocalEnv() {
   }
 }
 
+export function assertTestDatabaseUrl(url, productionUrl = process.env.MYSQL_URL) {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "mysql:") throw new Error("Refusing destructive verification: MYSQL_TEST_URL must use the mysql: protocol.");
+  const database = decodeURIComponent(parsed.pathname.replace(/^\//, ""));
+  if (!database.endsWith("_test")) throw new Error("Refusing destructive verification: MYSQL_TEST_URL database name must end in `_test`.");
+  if (productionUrl) {
+    const production = new URL(productionUrl);
+    const sameServer = parsed.hostname.toLowerCase() === production.hostname.toLowerCase()
+      && (parsed.port || "3306") === (production.port || "3306");
+    const productionDatabase = decodeURIComponent(production.pathname.replace(/^\//, ""));
+    if (sameServer && database === productionDatabase) {
+      throw new Error("Refusing destructive verification: MYSQL_TEST_URL resolves to the configured MYSQL_URL database.");
+    }
+  }
+  return { parsed, database };
+}
+
 export async function openTestDatabase({ reset = true, seed = true } = {}) {
   loadLocalEnv();
   const url = process.env.MYSQL_TEST_URL;
   if (!url) throw new Error("MYSQL_TEST_URL is not configured. On macOS run `npm run setup:local`; otherwise create a disposable MySQL 8 database whose name ends in `_test` and set MYSQL_TEST_URL.");
-  const parsed = new URL(url);
-  const database = decodeURIComponent(parsed.pathname.replace(/^\//, ""));
-  if (!database.endsWith("_test")) throw new Error("Refusing destructive verification: MYSQL_TEST_URL database name must end in `_test`.");
+  assertTestDatabaseUrl(url);
   let db;
   try { db = await mysql.createConnection({ uri: url, multipleStatements: true, timezone: "Z" }); }
   catch (error) { throw new Error(`MySQL test prerequisite unavailable: ${error instanceof Error ? error.message : String(error)}. Start MySQL 8 and check MYSQL_TEST_URL.`); }
@@ -30,6 +45,9 @@ export async function openTestDatabase({ reset = true, seed = true } = {}) {
     for (const row of tables) await db.query(`drop table if exists \`${String(row.TABLE_NAME ?? row.table_name).replaceAll("`", "``")}\``);
     await db.query("set foreign_key_checks=1");
     await db.query(readFileSync("db/schema.sql", "utf8"));
+    await db.query(readFileSync("db/migrations/001-minimum-order-total.sql", "utf8"));
+    await db.query(readFileSync("db/migrations/002-same-day-release.sql", "utf8"));
+    await db.query(readFileSync("db/migrations/003-delivery-hardening.sql", "utf8"));
     if (seed) {
       await db.query(readFileSync("db/seed-required-catalog.sql", "utf8"));
       await db.query(readFileSync("db/seed-pricing-details.sql", "utf8"));

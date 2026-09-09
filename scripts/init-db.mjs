@@ -9,7 +9,7 @@ if (!mysqlUrl) {
   process.exit(1);
 }
 
-const files = ["db/schema.sql", "db/seed-required-catalog.sql", "db/seed-pricing-details.sql"];
+const files = ["db/schema.sql", "db/migrations/001-minimum-order-total.sql", "db/migrations/002-same-day-release.sql", "db/migrations/003-delivery-hardening.sql", "db/seed-required-catalog.sql", "db/seed-pricing-details.sql"];
 let connection;
 try {
   connection = await mysql.createConnection({ uri: mysqlUrl, multipleStatements: true, timezone: "Z", ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined });

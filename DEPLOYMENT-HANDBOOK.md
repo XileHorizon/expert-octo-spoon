@@ -98,11 +98,13 @@ Enter these through the hosting provider's secrets/environment-variable UI or a 
 Required:
 
 - `MYSQL_URL` — least-privilege application user, production database only
-- `APP_URL` — exact public HTTPS origin
+- `APP_URL` — exact public HTTPS origin only; no credentials, path, query, or fragment
 - `EMAIL_FROM` — provider-authorized sender
 - `QUOTE_NOTIFICATION_TO` — shop recipient
 - `MAX_EMAIL_MESSAGE_BYTES` — tested complete-message limit
 - `SESSION_COOKIE_SECURE=true`
+- `FIRST_OWNER_SETUP_SECRET` — at least 32 random characters, used only in the masked `/admin/setup` form and removed after first owner creation
+- `RESET_DELIVERY_WORKER_SECRET` — a separate permanent 32+ character secret shared only by the application and scheduled maintenance process
 
 Choose one email path:
 
@@ -113,6 +115,7 @@ Optional policy values:
 
 - `SESSION_TTL_HOURS`
 - `PASSWORD_RESET_TTL_MINUTES`
+- `PASSWORD_RESET_RESPONSE_FLOOR_MS` — bounded neutral-response floor; defaults to 750 ms and is clamped to 250–5000 ms
 - `BACKUP_DIR`
 - `BACKUP_RETAIN_DAYS`
 - `PORT` only when the host does not assign it automatically
@@ -128,16 +131,19 @@ From the repository root:
 ```bash
 npm ci
 npm run rehearse:deploy
+npm run package:godaddy
 ```
 
 Do not proceed unless every gate passes:
 
 - TypeScript
 - ESLint
-- 54 unit tests
-- 17 MySQL schema/data checks
-- 6 operations checks
-- 78 complete HTTP/email workflow checks
+- 146 Vitest unit/component tests
+- 14 MySQL migration/intake integration checks
+- 19 MySQL schema/data checks
+- 8 operations checks
+- 95 complete HTTP/email workflow checks
+- 4 Playwright browser checks passing (plus 1 live-admin check skipped unless its disposable-server variables are configured)
 - Production build
 
 Then:
@@ -150,6 +156,8 @@ Then:
 - [ ] Record the previous production tag if this is an update.
 
 Never deploy `.env.local`, `.local-data`, `node_modules`, test artifacts, logs, or customer uploads.
+
+For GoDaddy Node.js Hosting, upload only `release-artifacts/ship-print-esell-godaddy-node24.zip`. The ZIP has `package.json` at its root and includes a generated `db/godaddy-import.sql` fallback. GoDaddy's public product page currently advertises Node.js 22; this release declares and requires Node 24. Treat an offered Node 24 runtime as a hard qualification gate.
 
 ## 5. Use staging before production
 
@@ -175,23 +183,22 @@ Use this path only after the provider passes Section 1.
 3. Set the build command to `npm run build` when the platform does not detect Next.js automatically.
 4. Set the start command to `npm start`.
 5. Enter the production environment values from Section 3 in the provider's secrets UI.
-6. Open the provider console/terminal and run:
+6. Apply the database schema through the provider console, release hook, or database import facility, then build the app. When a console is available, run:
 
 ```bash
 npm ci
 npm run db:init
 npm run build
-npm run create-owner -- owner@example.com
 ```
 
-Replace only the non-secret owner email placeholder. Enter the password through the masked prompt; never place it in the command.
+7. Create the first owner at `/admin/setup` using the owner email, a new password, and the deployment setup secret in masked fields. The route works only while no owner exists and permanently closes after creation. Remove `FIRST_OWNER_SETUP_SECRET` from the provider secrets UI afterward. If a terminal is available, `npm run create-owner -- owner@example.com` remains an alternative masked flow.
 
-7. Start or restart the application from the provider UI.
-8. Inspect runtime logs for startup/database/email errors.
-9. Attach the staging domain first. Attach the production domain only after staging passes.
-10. Confirm the provider has issued a valid HTTPS certificate.
+8. Start or restart the application from the provider UI.
+9. Inspect runtime logs for startup/database/email errors.
+10. Attach the staging domain first. Attach the production domain only after staging passes.
+11. Confirm the provider has issued a valid HTTPS certificate.
 
-If the platform has no terminal or release command hook, confirm how `db:init` and masked owner creation will be performed before purchasing or deploying.
+With `FIRST_OWNER_SETUP_SECRET` configured, `/admin/setup` can initialize a **completely empty** MySQL 8 database, apply the rerunnable schema/seeds, and then create the first owner. It refuses unknown or partial databases and never drops data. If runtime DDL is blocked or initialization is interrupted, import the ZIP's `db/godaddy-import.sql` once through GoDaddy's Database SQL/import UI into a new empty database, then return to `/admin/setup`. MySQL DDL auto-commits, so never retry against a partial database by deleting or overwriting tables without an operator review.
 
 ## 7. VPS deployment path
 
@@ -256,7 +263,7 @@ Before launch:
 - [ ] Run one database backup.
 - [ ] Restore it into a separate disposable database and verify it.
 - [ ] Schedule `scripts/backup.sh` or provider-equivalent backups.
-- [ ] Schedule `scripts/maintenance.mjs --apply` for expired sessions/reset tokens.
+- [ ] Set a separate 32+ character `RESET_DELIVERY_WORKER_SECRET` and schedule `scripts/maintenance.mjs --apply` for expired sessions/reset tokens and durable reset-delivery retries while the application is running.
 - [ ] Configure an external HTTPS monitor for `/api/health`.
 - [ ] Configure log retention/rotation.
 - [ ] Document who receives alerts and who responds.

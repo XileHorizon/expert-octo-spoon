@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { priceQuote } from "./pricing";
-import { formatQuoteEmail } from "./quote-email";
+import { formatCustomerConfirmation, formatQuoteEmail, formatQuoteEmailHtml } from "./quote-email";
 import type { Catalog } from "./types";
 import type { QuoteRequestInput } from "./validation";
 
@@ -12,7 +12,9 @@ const size = {
 
 const catalog: Catalog = {
   fixtureMode: false,
+  modeAdjustments: { color: "0", blackWhite: "0", portrait: "0", landscape: "0" },
   placeholderNotice: null,
+  minimumOrderTotal: "0.00",
   papers: [{ id: "matte", name: "16pt Matte", weight: "16 pt", category: "Matte", active: true }],
   products: [{ id: "cards", name: "Business Cards", description: "", active: true, minimumQuantity: 200, sizes: [size] }],
   finishing: [{ id: "rounded", name: "Rounded corners", active: true, unitPrice: "0.03", chargeBasis: "per_piece", sizeIds: [] }],
@@ -51,5 +53,25 @@ describe("formatQuoteEmail", () => {
     expect(email).toContain("Notes: None");
     expect(email).toContain("Pricing status: Manual quote required");
     expect(email).toContain("Estimated total: Manual quote");
+  });
+
+  it("renders the canonical summary as safe, email-client-compatible HTML", () => {
+    const summary = formatQuoteEmail({ requestId: "quote-<123>", payload: { ...payload, customer: { ...payload.customer, name: "Kevin & Co" } }, pricing: priceQuote(payload.jobs, catalog), catalog });
+    const html = formatQuoteEmailHtml(summary);
+    expect(html).toContain('<table role="presentation"');
+    expect(html).toContain("Kevin &amp; Co");
+    expect(html).toContain("quote-&lt;123&gt;");
+    expect(html).toContain("Estimated total:");
+    expect(html).not.toContain("Kevin & Co");
+  });
+
+  it("creates a customer confirmation with reference, provisional language, summary, and contact details", () => {
+    const text = formatCustomerConfirmation({
+      requestId: "quote-123", payload, pricing: priceQuote(payload.jobs, catalog), catalog,
+      business: { contactPhone: "555-0100", contactEmail: "shop@example.test", turnaroundIntro: "We review within one business day.", standardTurnaround: "3-5 days", rushTurnaround: "1-2 days" },
+    });
+    for (const detail of ["Reference: quote-123", "not a final quote", "front.pdf", "Provisional estimate", "shop@example.test", "original files are not attached"]) {
+      expect(text).toContain(detail);
+    }
   });
 });

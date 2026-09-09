@@ -57,6 +57,8 @@ export type PricingDraftState = {
   sizes: SizeDraft[];
   finishing: FinishingDraft[];
   bulkTiers: BulkTierDraft[];
+  minimumOrderTotal: string;
+  modeAdjustments: Catalog["modeAdjustments"];
 };
 
 /**
@@ -67,6 +69,8 @@ export function draftToCatalog(draft: PricingDraftState): Catalog {
   return {
     fixtureMode: false,
     placeholderNotice: null,
+    minimumOrderTotal: draft.minimumOrderTotal,
+    modeAdjustments: draft.modeAdjustments,
     papers: draft.papers.filter((paper) => paper.id).map((paper) => ({
       id: paper.id!, name: paper.name, weight: paper.weight, category: paper.category, active: paper.active,
     })),

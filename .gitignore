@@ -14,6 +14,9 @@
 /coverage
 /.artifacts/
 /.visual/
+/playwright-report/
+/test-results/
+/release-artifacts/
 
 # local development quote intake (contains customer files/data)
 /.local-data/

@@ -3,6 +3,16 @@ export type Money = string;
 export type BillingUnit = "printed_page" | "piece" | "card" | "job";
 export type ChargeBasis = "per_piece" | "per_printed_page" | "flat_per_job";
 export type QuantityBasis = "printed_pages" | "pieces";
+export type RequestStatus = "request_received" | "quote_sent" | "in_progress" | "awaiting_payment" | "fulfilled";
+export type DeliveryType = "shop_notification" | "customer_confirmation";
+
+export const REQUEST_STATUS_LABELS: Record<RequestStatus, string> = {
+  request_received: "Request received",
+  quote_sent: "Quote sent",
+  in_progress: "In progress",
+  awaiting_payment: "Awaiting payment",
+  fulfilled: "Fulfilled",
+};
 
 export const BILLING_UNIT_LABELS: Record<BillingUnit, string> = {
   printed_page: "Per printed page",
@@ -91,6 +101,15 @@ export type Catalog = {
   papers: Material[];
   finishing: FinishingOption[];
   bulkTiers: BulkTier[];
+  /** Quote-wide floor applied only when every job is automatically priced. */
+  minimumOrderTotal: Money;
+  /** Optional surcharge per size billing unit for each selected production mode. */
+  modeAdjustments: {
+    color: Money;
+    blackWhite: Money;
+    portrait: Money;
+    landscape: Money;
+  };
   fixtureMode: boolean;
   placeholderNotice: string | null;
 };
@@ -131,5 +150,11 @@ export type QuotePrice = {
   total: Money | null;
   /** Sum of priced items, even when other items need manual pricing. */
   pricedSubtotal: Money;
+  /** Complete pre-adjustment subtotal only when every item is priced. */
+  subtotal: Money | null;
+  /** Quote-wide minimum adjustment; null when disabled or not applicable. */
+  minimumOrderAdjustment: Money | null;
+  /** Quote-wide lines shown after the item subtotals. */
+  lines: PriceLine[];
   items: JobPrice[];
 };

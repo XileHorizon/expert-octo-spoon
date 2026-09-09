@@ -17,7 +17,7 @@
 import { spawn } from "node:child_process";
 import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { SMTPServer } from "smtp-server";
 import { openTestDatabase, loadLocalEnv } from "./mysql-test-helper.mjs";
 
@@ -34,6 +34,8 @@ const PW_INITIAL = ["Initial", "Owner", "Pass", "9"].join("");
 const PW_WRONG   = ["Totally", "Wrong", "Pass", "1"].join("");
 const PW_NEW     = ["Rotated", "Owner", "Pass", "7"].join("");
 const PW_WEAK    = "short";
+const SETUP_SECRET = ["verification", "-only-", "deployment-", "secret-", "1234567890"].join("");
+const RESET_WORKER_SECRET = ["verification", "-only-", "reset-worker-", "secret-", "1234567890"].join("");
 
 const ok = (label) => { passes++; console.log(`  \x1b[32mPASS\x1b[0m  ${label}`); };
 const bad = (label, detail) => { failures++; console.log(`  \x1b[31mFAIL\x1b[0m  ${label}${detail ? ` — ${detail}` : ""}`); };
@@ -100,6 +102,8 @@ try {
     MAX_EMAIL_MESSAGE_BYTES: String(95 * 1024 * 1024),
     NEXT_PUBLIC_ENABLE_DEMO_PRICING: "false",
     ENABLE_LOCAL_DEV_INTAKE: "false",
+    FIRST_OWNER_SETUP_SECRET: SETUP_SECRET,
+    RESET_DELIVERY_WORKER_SECRET: RESET_WORKER_SECRET,
   };
 
   // Keep the developer's .env.local out of the run.
@@ -148,10 +152,16 @@ try {
 
   // ------------------------------------------------------- owner creation
   console.log("\n\x1b[1mOwner account\x1b[0m");
-  const bcrypt = (await import("bcryptjs")).default;
-  const hash = await bcrypt.hash(PW_INITIAL, 12);
-  await db.query("insert into owners(email,password_hash,active) values (?,?,true)", ["owner@example.test", hash]);
-  ok("owner account created");
+  const setup = await call("/api/auth/setup", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "owner@example.test", password: PW_INITIAL, setupSecret: SETUP_SECRET }),
+  });
+  check("first owner created through one-time web setup", setup.status === 201, JSON.stringify(await json(setup)));
+  const repeatedSetup = await call("/api/auth/setup", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "second@example.test", password: PW_INITIAL, setupSecret: SETUP_SECRET }),
+  });
+  check("first-owner setup permanently refuses a second owner", repeatedSetup.status === 409);
 
   const badLogin = await call("/api/auth/login", {
     method: "POST", headers: { "content-type": "application/json" },
@@ -228,6 +238,8 @@ try {
     sizes: structuredClone(source.sizes).map((size) => { delete size.product_id; return size; }),
     finishing: structuredClone(source.finishing),
     bulk_tiers: structuredClone(source.bulk_tiers),
+    minimum_order_total: source.minimum_order_total ?? "0.00",
+    mode_adjustments: structuredClone(source.mode_adjustments ?? { color: "0", black_white: "0", portrait: "0", landscape: "0" }),
   });
   const invalidDraft = editableDraft(config);
   invalidDraft.sizes[0].base_price = "-5";
@@ -238,12 +250,15 @@ try {
 
   const productId = (await db.query("select id from products order by sort_order limit 1")).rows[0].id;
   const letterId = letterIdSaved, legalId = legalIdSaved, cardsId = cardsIdSaved;
+  await db.query("update business_settings set minimum_order_total='100.00',color_adjustment='0.0500',black_white_adjustment='0.0100',portrait_adjustment='0',landscape_adjustment='0.0200' where id=1");
 
   // ------------------------------------------------------- public catalog
   console.log("\n\x1b[1mPublic catalog\x1b[0m");
   const catalog = await json(await call("/api/catalog"));
   check("public catalog serves the saved product", catalog?.products?.[0]?.name === "Print products");
   check("catalog is not in fixture mode", catalog?.fixtureMode === false);
+  check("minimum order total is published with the catalog", catalog?.minimumOrderTotal === "100.00", catalog?.minimumOrderTotal);
+  check("color and orientation adjustments are published", catalog?.modeAdjustments?.color === "0.0500" && catalog?.modeAdjustments?.landscape === "0.0200", JSON.stringify(catalog?.modeAdjustments));
   check("size-specific paper relationships are published", catalog?.products?.[0]?.sizes?.find((item) => item.id === legalId)?.papers?.some((item) => item.materialId === legalPaperId));
 
   // ------------------------------------------------------ quote submission
@@ -302,10 +317,11 @@ try {
 
   // ----------------------------------------------------------------- email
   console.log("\n\x1b[1mNotification email\x1b[0m");
-  for (let i = 0; i < 40 && inbox.length === 0; i += 1) await sleep(250);
-  check("notification email was sent", inbox.length > 0);
-  const message = inbox[0] ?? "";
-  check("addressed to the shop", /To:.*shop@example\.test/i.test(message));
+  for (let i = 0; i < 40 && inbox.length < 2; i += 1) await sleep(250);
+  check("shop notification and customer confirmation were sent", inbox.length === 2, `received ${inbox.length}`);
+  const message = inbox.find((mail) => /^To:.*shop@example\.test/im.test(mail)) ?? "";
+  const customerMessage = inbox.find((mail) => /^To:.*customer@example\.test/im.test(mail)) ?? "";
+  check("addressed to the shop", Boolean(message));
   check("reply-to is the customer", /Reply-To:.*customer@example\.test/i.test(message));
   for (const [label, pattern] of [
     ["customer name", /Test Customer/],
@@ -318,8 +334,12 @@ try {
     ["finishing", /Rounded corners/],
     ["customer notes", /Card instructions/],
     ["estimated total", /Estimated total: \$/],
+    ["minimum order adjustment", /Minimum order adjustment: \$/],
   ]) check(`email includes ${label}`, pattern.test(message));
-  check("all three originals attached", (message.match(/Content-Disposition: attachment/gi) ?? []).length === 3);
+  check("all three originals attached only to shop notification", (message.match(/Content-Disposition: attachment/gi) ?? []).length === 3);
+  check("customer confirmation has no attachments", (customerMessage.match(/Content-Disposition: attachment/gi) ?? []).length === 0);
+  const decodedCustomerMessage = customerMessage.replace(/=\r?\n/g, "");
+  check("customer confirmation is provisional and references the request", /not a final quote/i.test(decodedCustomerMessage) && decodedCustomerMessage.includes(requestId));
 
   // ---------------------------------------------------------- portal review
   console.log("\n\x1b[1mOwner portal review\x1b[0m");
@@ -329,7 +349,7 @@ try {
   const searched = await json(await call("/api/admin/requests?search=Acme"));
   check("search finds the request by organization", searched?.requests?.some((r) => r.id === requestId));
 
-  const filtered = await json(await call("/api/admin/requests?status=closed"));
+  const filtered = await json(await call("/api/admin/requests?status=fulfilled"));
   check("status filter excludes non-matching requests", !filtered?.requests?.some((r) => r.id === requestId));
 
   const detail = await json(await call(`/api/admin/requests/${requestId}`));
@@ -339,17 +359,20 @@ try {
   check("different sizes, papers, and quantities persisted", new Set(detail?.jobs?.map((job) => job.size_id)).size === 3 && new Set(detail?.jobs?.map((job) => job.material_id)).size === 3 && detail?.jobs?.map((job) => job.quantity).join(",") === "25,50,200");
   check("per-file color and orientation persisted", detail?.jobs?.[1]?.color_mode === "black-white" && detail?.jobs?.[1]?.orientation === "landscape");
   check("customer notes preserved", detail?.jobs?.[2]?.notes === "Card instructions");
-  check("delivery status recorded", detail?.emails?.[0]?.status === "provider_accepted", detail?.emails?.[0]?.status);
+  check("selected mode adjustment snapshots persisted", Number(detail?.jobs?.[0]?.color_adjustment) > 0 && Number(detail?.jobs?.[1]?.orientation_adjustment) > 0);
+  check("both delivery types and recipients are recorded", detail?.emails?.length === 2 && new Set(detail.emails.map((email) => email.delivery_type)).size === 2 && detail.emails.every((email) => email.recipient));
+  check("delivery status recorded", detail?.emails?.every((email) => email.status === "provider_accepted"), JSON.stringify(detail?.emails));
+  check("minimum-order subtotal and adjustment snapshot persisted", detail?.request?.calculated_subtotal !== null && Number(detail?.request?.minimum_order_adjustment) > 0 && detail?.request?.calculated_total === "100.00");
 
   check("artwork is not retained as a web download", detail?.jobs?.every((job) => job.storage_path === null));
 
   const statusUpdate = await call(`/api/admin/requests/${requestId}`, {
     method: "PATCH", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ status: "reviewing" }),
+    body: JSON.stringify({ status: "in_progress" }),
   });
   check("status update saved", statusUpdate.status === 200);
   const afterStatus = await json(await call(`/api/admin/requests/${requestId}`));
-  check("status change persisted", afterStatus?.request?.status === "reviewing");
+  check("status change persisted", afterStatus?.request?.status === "in_progress");
 
   const badStatus = await call(`/api/admin/requests/${requestId}`, {
     method: "PATCH", headers: { "content-type": "application/json" },
@@ -384,35 +407,76 @@ try {
       contact_phone: "(555) 010-2000", contact_email: "hello@example.test",
       turnaround_intro: "We reply within one business day.",
       standard_turnaround: "3-5 Business Days", rush_turnaround: "1-2 Business Days",
-      support_copy: "Need help?", notification_target: "shop@example.test",
+      support_copy: "Need help?", notification_target: "shop@example.test", minimum_order_total: "25.00",
+      color_adjustment: "0.0500", black_white_adjustment: "0.0100", portrait_adjustment: "0", landscape_adjustment: "0.0200",
     }),
   });
   check("business settings saved", settings.status === 200);
   const badSettings = await call("/api/admin/settings", {
     method: "PUT", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ contact_phone: "x", contact_email: "not-an-email", turnaround_intro: "t", standard_turnaround: "s", rush_turnaround: "r", support_copy: "c", notification_target: null }),
+    body: JSON.stringify({ contact_phone: "x", contact_email: "not-an-email", turnaround_intro: "t", standard_turnaround: "s", rush_turnaround: "r", support_copy: "c", notification_target: null, minimum_order_total: "0.00", color_adjustment: "0", black_white_adjustment: "0", portrait_adjustment: "0", landscape_adjustment: "0" }),
   });
   check("invalid contact email rejected", badSettings.status === 422);
 
   // -------------------------------------------------------- password reset
   console.log("\n\x1b[1mPassword reset\x1b[0m");
   inbox.length = 0;
-  const requestReset = await call("/api/auth/request-reset", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "owner@example.test" }),
-  });
-  check("reset request accepted", requestReset.status === 200);
-
   const unknownReset = await call("/api/auth/request-reset", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: "stranger@example.test" }),
   });
   const unknownResetBody = await json(unknownReset);
-  const knownResetBody = await json(requestReset);
-  check("unknown address gets an identical response", unknownResetBody?.message === knownResetBody?.message);
+  const unknownResetRows = await db.query("select count(*) as jobs from owner_password_reset_deliveries");
+  const unknownTokenRows = await db.query("select count(*) as tokens from owner_password_resets");
+  check("unknown address creates no reset delivery job or token",
+    Number(unknownResetRows.rows[0]?.jobs) === 0 && Number(unknownTokenRows.rows[0]?.tokens) === 0);
 
-  for (let i = 0; i < 40 && inbox.length === 0; i += 1) await sleep(250);
-  check("reset email delivered", inbox.length > 0);
+  // Force the first durable delivery attempt to fail, then exercise the
+  // authenticated route a shared-host cron can invoke after SMTP recovers.
+  await new Promise((resolve) => smtp.close(resolve)); smtp = null;
+  const requestReset = await call("/api/auth/request-reset", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "owner@example.test" }),
+  });
+  check("reset request accepted while SMTP is unavailable", requestReset.status === 200);
+  const knownResetBody = await json(requestReset);
+  check("unknown address gets an identical neutral response", unknownReset.status === requestReset.status && unknownResetBody?.message === knownResetBody?.message);
+
+  let failedAttempt = false;
+  for (let i = 0; i < 40 && !failedAttempt; i += 1) {
+    await sleep(250);
+    const row = (await db.query("select status,attempt_count from owner_password_reset_deliveries limit 1")).rows[0];
+    failedAttempt = row?.status === "queued" && Number(row?.attempt_count) === 1;
+  }
+  check("failed background handoff remains durably queued for retry", failedAttempt);
+
+  smtp = new SMTPServer({
+    authOptional: true,
+    disabledCommands: ["STARTTLS"],
+    onData(stream, _session, callback) {
+      let raw = "";
+      stream.on("data", (chunk) => { raw += chunk; });
+      stream.on("end", () => { inbox.push(raw); callback(); });
+    },
+  });
+  await new Promise((resolve) => smtp.listen(SMTP_PORT, "127.0.0.1", resolve));
+  await db.query("update owner_password_reset_deliveries set available_at=utc_timestamp(3) where status='queued'");
+
+  const unauthorizedWorker = await call("/api/internal/password-reset-deliveries", { method: "POST" });
+  check("reset retry route rejects unauthenticated callers", unauthorizedWorker.status === 401);
+  const retryWorker = await call("/api/internal/password-reset-deliveries", {
+    method: "POST", headers: { authorization: `Bearer ${RESET_WORKER_SECRET}` },
+  });
+  const retryWorkerBody = await json(retryWorker);
+  check("authenticated scheduled reset worker processes the queued retry", retryWorker.status === 200 && retryWorkerBody?.processed === 1, JSON.stringify(retryWorkerBody));
+
+  let deliveredResetJob = false;
+  for (let i = 0; i < 40 && (!inbox.length || !deliveredResetJob); i += 1) {
+    await sleep(250);
+    deliveredResetJob = (await db.query("select status from owner_password_reset_deliveries limit 1")).rows[0]?.status === "delivered";
+  }
+  const resetJob = (await db.query("select status,attempt_count from owner_password_reset_deliveries limit 1")).rows[0];
+  check("queued reset email reaches SMTP and records the safe retry", inbox.length > 0 && deliveredResetJob && Number(resetJob?.attempt_count) === 2, JSON.stringify(resetJob));
   const resetMail = (inbox[0] ?? "").replace(/=\r?\n/g, "");
   const tokenMatch = resetMail.match(/reset\?token=3D([A-Za-z0-9_-]+)|reset\?token=([A-Za-z0-9_-]+)/);
   const resetToken = tokenMatch?.[1] ?? tokenMatch?.[2];
@@ -423,6 +487,16 @@ try {
     body: JSON.stringify({ token: resetToken, password: PW_WEAK }),
   });
   check("weak password rejected", weak.status === 422);
+
+  const expiredToken = "expired-reset-token-for-verification";
+  const expiredHash = createHash("sha256").update(expiredToken).digest("hex");
+  const ownerId = (await db.query("select id from owners where email='owner@example.test'")).rows[0].id;
+  await db.query("insert into owner_password_resets(token_hash,owner_id,expires_at) values (?,?,date_sub(utc_timestamp(3),interval 1 minute))", [expiredHash, ownerId]);
+  const expired = await call("/api/auth/reset", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: expiredToken, password: PW_NEW }),
+  });
+  check("expired reset token is rejected", expired.status === 400);
 
   const reset = await call("/api/auth/reset", {
     method: "POST", headers: { "content-type": "application/json" },
@@ -465,9 +539,23 @@ try {
   failedForm.set("payload", JSON.stringify(failedPayload));
   const failedHandoff = await fetch(`${BASE}/api/quote-requests`, { method: "POST", body: failedForm });
   const failedHandoffBody = await json(failedHandoff);
-  check("submission does not report success when SMTP rejects the handoff", failedHandoff.status === 502 && /could not be safely accepted/i.test(failedHandoffBody?.error ?? ""));
+  check("submission does not report success when SMTP rejects the handoff", failedHandoff.status === 502 && /recorded.*file email was not accepted/i.test(failedHandoffBody?.error ?? ""));
   const failedRecord = await db.query("select status from quote_requests where idempotency_key=?", [failedPayload.idempotencyKey]);
-  check("failed handoff is flagged for owner visibility", failedRecord.rows[0]?.status === "intake_failed");
+  check("failed handoff is flagged for owner visibility", failedRecord.rows[0]?.status === "request_received");
+  const failedAudits = await db.query(
+    "select delivery_type,status from email_deliveries where quote_request_id=(select id from quote_requests where idempotency_key=?) order by delivery_type",
+    [failedPayload.idempotencyKey],
+  );
+  check("delivery audits exist before handoff and preserve the failed shop outcome",
+    failedAudits.rows.length === 2
+      && failedAudits.rows.some((row) => row.delivery_type === "shop_notification" && row.status === "failed")
+      && failedAudits.rows.some((row) => row.delivery_type === "customer_confirmation" && row.status === "queued"),
+    JSON.stringify(failedAudits.rows));
+  const failedRetry = await fetch(`${BASE}/api/quote-requests`, { method: "POST", body: failedForm });
+  const failedRetryBody = await json(failedRetry);
+  check("same-key retry replays the failed outcome instead of appearing successful", failedRetry.status === 502 && failedRetryBody?.duplicate === true);
+  const retryRows = await db.query("select count(*) as n from quote_requests where idempotency_key=?", [failedPayload.idempotencyKey]);
+  check("failed same-key retry creates no duplicate request", Number(retryRows.rows[0]?.n) === 1);
   const failedJobs = await db.query("select storage_path from quote_jobs where quote_request_id=(select id from quote_requests where idempotency_key=?)", [failedPayload.idempotencyKey]);
   check("failed handoff still creates no artwork archive", failedJobs.rows.every((row) => row.storage_path === null));
 

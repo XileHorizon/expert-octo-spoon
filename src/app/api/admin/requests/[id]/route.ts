@@ -21,7 +21,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
     const [jobs, emails] = await Promise.all([
       queryRows("select * from quote_jobs where quote_request_id = ? order by created_at", [id]),
-      queryRows("select * from email_deliveries where quote_request_id = ? order by created_at desc", [id]),
+      queryRows("select * from email_deliveries where quote_request_id = ? order by attempt_sequence desc", [id]),
     ]);
 
     return NextResponse.json({ request: record, jobs, emails });

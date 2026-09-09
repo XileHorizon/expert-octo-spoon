@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pricingDraftSchema } from "./admin-validation";
+import { businessSettingsSchema, defaultBusinessSettings, pricingDraftSchema } from "./admin-validation";
 
 const paperId = "11111111-1111-4111-8111-111111111111";
 const sizeId = "22222222-2222-4222-8222-222222222222";
@@ -13,6 +13,8 @@ const draft = {
   }],
   finishing: [{ name: "Folding", unit_price: "0.04", charge_basis: "per_piece" as const, size_ids: [sizeId], active: true, sort_order: 0 }],
   bulk_tiers: [{ min_quantity: 100, discount_percent: "5", quantity_basis: "printed_pages" as const, size_ids: [sizeId], active: true, sort_order: 0 }],
+  minimum_order_total: "0.00",
+  mode_adjustments: { color: "0", black_white: "0", portrait: "0", landscape: "0" },
 };
 
 const parse = (value: unknown) => pricingDraftSchema.safeParse(value);
@@ -58,5 +60,15 @@ describe("pricing draft validation", () => {
 
   it("requires a minimum quantity of at least one", () => {
     expect(parse({ ...draft, sizes: [{ ...draft.sizes[0], minimum_quantity: 0 }] }).success).toBe(false);
+  });
+});
+
+describe("business settings validation", () => {
+  it.each(["0", "0.00", "25.50"])("accepts minimum order total %s", (minimum_order_total) => {
+    expect(businessSettingsSchema.safeParse({ ...defaultBusinessSettings, minimum_order_total }).success).toBe(true);
+  });
+
+  it.each(["-1", "1.001", "not-money"])("rejects invalid minimum order total %s", (minimum_order_total) => {
+    expect(businessSettingsSchema.safeParse({ ...defaultBusinessSettings, minimum_order_total }).success).toBe(false);
   });
 });

@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const listQuerySchema = z.object({
-  status: z.enum(["all", "received", "intake_failed", "reviewing", "quoted", "closed"]).default("all"),
+  status: z.enum(["all", "request_received", "quote_sent", "in_progress", "awaiting_payment", "fulfilled"]).default("all"),
   search: z.string().trim().max(160).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).max(100000).default(0),
@@ -39,7 +39,10 @@ export async function GET(request: Request) {
   try {
     const [rows, totals] = await Promise.all([
       queryRows(
-        `select id, customer_name, customer_email, organization, status, pricing_status, calculated_total, created_at
+        `select id, customer_name, customer_email, organization, status, pricing_status, calculated_total, created_at,
+                (select e.status from email_deliveries e
+                  where e.quote_request_id=quote_requests.id and e.delivery_type='shop_notification'
+                  order by e.attempt_sequence desc limit 1) as shop_delivery_status
            from quote_requests ${where}
           order by created_at desc
           limit ? offset ?`,

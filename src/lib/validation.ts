@@ -34,9 +34,14 @@ export function configuredMaxEmailBytes() {
 export function uploadLimitProblem(fileBytes: number, fileCount: number, maxEmailBytes = configuredMaxEmailBytes()) {
   if (fileBytes > MAX_TOTAL_BYTES) return "Combined files exceed the upload limit.";
   if (estimateEncodedEmailBytes(fileBytes, fileCount) > maxEmailBytes) {
-    return "The files would exceed the email attachment limit after encoding. Reduce the submission size or contact the shop for another transfer method.";
+    return "The files would exceed the email attachment limit after encoding. Reduce the submission size.";
   }
   return null;
+}
+
+export function uploadLimitProblemWithContact(problem: string, contact?: { contact_phone?: string | null; contact_email?: string | null } | null) {
+  const details = [contact?.contact_phone, contact?.contact_email].filter(Boolean).join(" or ");
+  return `${problem} Please contact the print shop directly${details ? ` at ${details}` : ""}.`;
 }
 
 export const jobSchema = z.object({

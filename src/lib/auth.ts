@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { isDatabaseConfigured, queryOne, query, transaction } from "./db";
@@ -91,6 +91,35 @@ export async function findOwnerByEmail(email: string) {
   return queryOne<OwnerRow>("select id, email, password_hash, active from owners where email = ?", [email]);
 }
 
+export async function firstOwnerSetupAvailable() {
+  if (!isDatabaseConfigured()) return false;
+  const row = await queryOne<{ completed_at: Date | null; owner_count: number }>(
+    `select s.completed_at, (select count(*) from owners) as owner_count
+       from owner_setup_state s where s.id=1`,
+  );
+  return Boolean(row && !row.completed_at && Number(row.owner_count) === 0);
+}
+
+/** Transactionally creates the only bootstrap owner and permanently closes setup. */
+export async function createFirstOwner(email: string, password: string) {
+  const passwordHash = await hashPassword(password);
+  return transaction(async (client) => {
+    const state = await client.query<{ completed_at: Date | null }>("select completed_at from owner_setup_state where id=1 for update");
+    if (!state.rows[0]) throw new Error("Owner setup state is missing. Re-run database initialization.");
+    const owners = await client.query<{ id: string }>("select id from owners order by created_at limit 1");
+    if (state.rows[0].completed_at || owners.rows.length) {
+      if (!state.rows[0].completed_at && owners.rows[0]) {
+        await client.query("update owner_setup_state set completed_at=utc_timestamp(3),owner_id=? where id=1", [owners.rows[0].id]);
+      }
+      return { ok: false as const, reason: "closed" as const };
+    }
+    const ownerId = randomUUID();
+    await client.query("insert into owners(id,email,password_hash,active) values (?,?,?,true)", [ownerId, email, passwordHash]);
+    await client.query("update owner_setup_state set completed_at=utc_timestamp(3),owner_id=? where id=1", [ownerId]);
+    return { ok: true as const, ownerId };
+  });
+}
+
 /** Returns the raw reset token; only its hash is stored. */
 export async function createPasswordReset(ownerId: string) {
   const token = newToken();
@@ -122,11 +151,10 @@ export async function consumePasswordReset(token: string, newPassword: string) {
   });
 }
 
-/** Constant-time compare helper for any fixed-length secret comparisons. */
+/** Constant-time compare helper that does not reveal the configured secret length. */
 export function safeEquals(a: string, b: string) {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  if (left.length !== right.length) return false;
+  const left = createHash("sha256").update(a).digest();
+  const right = createHash("sha256").update(b).digest();
   return timingSafeEqual(left, right);
 }
 

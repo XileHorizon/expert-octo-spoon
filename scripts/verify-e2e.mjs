@@ -14,11 +14,21 @@ try {
   db = await openTestDatabase({ reset: true, seed: true });
   check("schema and both seeds apply", true);
   await db.query(readFileSync("db/schema.sql", "utf8"));
+  await db.query(readFileSync("db/migrations/001-minimum-order-total.sql", "utf8"));
+  await db.query(readFileSync("db/migrations/002-same-day-release.sql", "utf8"));
+  await db.query(readFileSync("db/migrations/002-same-day-release.sql", "utf8"));
+  await db.query(readFileSync("db/migrations/003-delivery-hardening.sql", "utf8"));
+  await db.query(readFileSync("db/migrations/003-delivery-hardening.sql", "utf8"));
   await db.query(readFileSync("db/seed-required-catalog.sql", "utf8"));
   await db.query(readFileSync("db/seed-pricing-details.sql", "utf8"));
   check("schema and seeds are rerunnable", true);
+  const settingsColumns = await db.query("select column_name from information_schema.columns where table_schema=database() and table_name='business_settings'");
+  const requestColumns = await db.query("select column_name from information_schema.columns where table_schema=database() and table_name='quote_requests'");
+  check("pricing settings and quote snapshot columns exist", ["minimum_order_total", "color_adjustment", "black_white_adjustment", "portrait_adjustment", "landscape_adjustment"].every((name) => settingsColumns.rows.some((row) => (row.COLUMN_NAME ?? row.column_name) === name)) && ["calculated_subtotal", "minimum_order_adjustment"].every((name) => requestColumns.rows.some((row) => (row.COLUMN_NAME ?? row.column_name) === name)));
+  const deliveryColumns = await db.query("select column_name from information_schema.columns where table_schema=database() and table_name='email_deliveries'");
+  check("delivery type, recipient, and attempt sequence columns exist", ["delivery_type", "recipient", "attempt_sequence"].every((name) => deliveryColumns.rows.some((row) => (row.COLUMN_NAME ?? row.column_name) === name)));
   const tables = await db.query("select table_name from information_schema.tables where table_schema=database()");
-  const required = ["owners","owner_sessions","owner_password_resets","products","sizes","materials","material_sizes","size_papers","bulk_tiers","bulk_tier_sizes","finishing_options","finishing_sizes","fulfillment_options","quote_requests","quote_jobs","email_deliveries","business_settings","admin_activity_log"];
+  const required = ["owners","owner_setup_state","owner_sessions","owner_password_resets","owner_password_reset_deliveries","products","sizes","materials","material_sizes","size_papers","bulk_tiers","bulk_tier_sizes","finishing_options","finishing_sizes","fulfillment_options","quote_requests","quote_jobs","email_deliveries","business_settings","admin_activity_log"];
   check(`all ${required.length} tables created`, required.every((name) => tables.rows.some((row) => row.TABLE_NAME === name || row.table_name === name)));
   check("all seven required sizes seeded", Number((await db.query("select count(*) as n from sizes where product_id='10000000-0000-4000-8000-000000000001'")).rows[0].n) === 7);
   check("all twelve paper mappings seeded", Number((await db.query("select count(*) as n from size_papers")).rows[0].n) === 12);
@@ -55,27 +65,27 @@ try {
   check("MySQL enforces nonnegative pricing", negative);
 
   const requestId = randomUUID();
-  await db.query("insert into quote_requests(id,idempotency_key,customer_name,customer_email,fulfillment_id,fulfillment_name,pricing_status,calculated_total,status) values (?,?,'Customer','customer@example.com',?,'Pickup','priced','37.00','received')", [requestId, randomUUID(), fulfillmentId]);
+  await db.query("insert into quote_requests(id,idempotency_key,customer_name,customer_email,fulfillment_id,fulfillment_name,pricing_status,calculated_total,status) values (?,?,'Customer','customer@example.com',?,'Pickup','priced','37.00','request_received')", [requestId, randomUUID(), fulfillmentId]);
   await db.query("insert into quote_jobs(id,quote_request_id,client_id,file_name,file_size,mime_type,product_id,size_id,material_id,product_name,size_name,material_name,finishing_names,quantity,sides,finishing_ids,pricing_status,calculated_subtotal) values (?,?, 'job','art.pdf',2048,'application/pdf',?,?,?,?,?,?,?,200,2,?,'priced','37.00')", [randomUUID(), requestId, productId, sizeId, materialId, "Cards", "3.5 x 2", "16pt Matte", JSON.stringify(["Rounded"]), JSON.stringify([finishId])]);
   const history = (await db.query("select product_name,material_name,finishing_names from quote_jobs where quote_request_id=?", [requestId])).rows[0];
   check("quote snapshots and JSON arrays persist", history.product_name === "Cards" && history.material_name === "16pt Matte" && JSON.stringify(history.finishing_names).includes("Rounded"));
   check("JSON history lookup finds finishing usage", (await db.query("select 1 from quote_jobs where json_contains(finishing_ids,json_quote(?))", [finishId])).rowCount === 1);
   let duplicateRequest = false;
   const key = randomUUID();
-  await db.query("insert into quote_requests(idempotency_key,customer_name,customer_email,pricing_status,status) values (?,'A','a@b.com','manual','received')", [key]);
-  try { await db.query("insert into quote_requests(idempotency_key,customer_name,customer_email,pricing_status,status) values (?,'A','a@b.com','manual','received')", [key]); } catch { duplicateRequest = true; }
+  await db.query("insert into quote_requests(idempotency_key,customer_name,customer_email,pricing_status,status) values (?,'A','a@b.com','manual','request_received')", [key]);
+  try { await db.query("insert into quote_requests(idempotency_key,customer_name,customer_email,pricing_status,status) values (?,'A','a@b.com','manual','request_received')", [key]); } catch { duplicateRequest = true; }
   check("idempotency key blocks duplicate requests", duplicateRequest);
   let badStatus = false;
   try { await db.query("update quote_requests set status='deleted' where id=?", [requestId]); } catch { badStatus = true; }
   check("status enum rejects invalid state", badStatus);
   const before = new Date((await db.query("select updated_at from quote_requests where id=?", [requestId])).rows[0].updated_at).getTime();
   await new Promise((resolve) => setTimeout(resolve, 20));
-  await db.query("update quote_requests set status='reviewing' where id=?", [requestId]);
+  await db.query("update quote_requests set status='in_progress' where id=?", [requestId]);
   const after = new Date((await db.query("select updated_at from quote_requests where id=?", [requestId])).rows[0].updated_at).getTime();
   check("updated_at advances automatically", after > before);
 
   const cascadeId = randomUUID();
-  await db.query("insert into quote_requests(id,idempotency_key,customer_name,customer_email,pricing_status,status) values (?,?, 'C','c@d.com','manual','received')", [cascadeId, randomUUID()]);
+  await db.query("insert into quote_requests(id,idempotency_key,customer_name,customer_email,pricing_status,status) values (?,?, 'C','c@d.com','manual','request_received')", [cascadeId, randomUUID()]);
   await db.query("insert into quote_jobs(id,quote_request_id,client_id,file_name,file_size,mime_type,product_id,size_id,material_id,quantity,sides,pricing_status) values (?,?, 'j','f.pdf',10,'application/pdf','p','s','m',1,1,'manual')", [randomUUID(), cascadeId]);
   await db.query("delete from quote_requests where id=?", [cascadeId]);
   check("request deletion cascades to jobs", (await db.query("select 1 from quote_jobs where quote_request_id=?", [cascadeId])).rowCount === 0);

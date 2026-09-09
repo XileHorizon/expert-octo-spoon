@@ -59,6 +59,7 @@ export async function sendViaGmailApi(message: {
   replyTo?: string;
   subject: string;
   text: string;
+  html?: string;
   attachments?: { filename: string; content: Buffer; contentType: string }[];
 }) {
   const compiler = nodemailer.createTransport({ streamTransport: true, buffer: true, newline: "unix" });

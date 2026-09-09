@@ -1,5 +1,5 @@
 import { getSeedCatalog } from "./catalog";
-import { isDatabaseConfigured, queryRows } from "./db";
+import { isDatabaseConfigured, queryOne, queryRows } from "./db";
 import type { BillingUnit, Catalog, ChargeBasis, QuantityBasis } from "./types";
 
 type ProductRow = { id: string; name: string; description: string | null; active: boolean; minimum_quantity: number };
@@ -11,12 +11,16 @@ type MaterialRow = { id: string; name: string; active: boolean; weight: string |
 type SizePaperRow = { size_id: string; material_id: string; surcharge: string | null; is_standard: boolean; active: boolean };
 type TierRow = { id: string; min_quantity: number; discount_percent: string | null; quantity_basis: QuantityBasis; active: boolean };
 type FinishingRow = { id: string; name: string; unit_price: string | null; charge_basis: ChargeBasis; active: boolean };
+type BusinessSettingsRow = {
+  minimum_order_total: string; color_adjustment: string; black_white_adjustment: string;
+  portrait_adjustment: string; landscape_adjustment: string;
+};
 
 export async function getServerCatalog(): Promise<Catalog> {
   if (!isDatabaseConfigured()) return getSeedCatalog();
 
   try {
-    const [products, sizes, papers, sizePapers, tiers, tierSizes, finishing, finishingSizes] = await Promise.all([
+    const [products, sizes, papers, sizePapers, tiers, tierSizes, finishing, finishingSizes, settings] = await Promise.all([
       queryRows<ProductRow>("select id,name,description,active,minimum_quantity from products where active order by sort_order, name"),
       queryRows<SizeRow>("select id,product_id,name,active,dimensions,base_price,billing_unit,minimum_quantity,manual_quote,included_note from sizes where active order by sort_order, name"),
       queryRows<MaterialRow>("select id,name,active,weight,category from materials where active order by sort_order, name"),
@@ -25,6 +29,7 @@ export async function getServerCatalog(): Promise<Catalog> {
       queryRows<{ tier_id: string; size_id: string }>("select tier_id,size_id from bulk_tier_sizes"),
       queryRows<FinishingRow>("select id,name,unit_price,charge_basis,active from finishing_options where active order by sort_order, name"),
       queryRows<{ finishing_id: string; size_id: string }>("select finishing_id,size_id from finishing_sizes"),
+      queryOne<BusinessSettingsRow>("select minimum_order_total,color_adjustment,black_white_adjustment,portrait_adjustment,landscape_adjustment from business_settings where id = 1"),
     ]);
 
     if (products.length === 0) return getSeedCatalog();
@@ -32,6 +37,13 @@ export async function getServerCatalog(): Promise<Catalog> {
     return {
       fixtureMode: false,
       placeholderNotice: null,
+      minimumOrderTotal: settings?.minimum_order_total ?? "0.00",
+      modeAdjustments: {
+        color: settings?.color_adjustment ?? "0.0000",
+        blackWhite: settings?.black_white_adjustment ?? "0.0000",
+        portrait: settings?.portrait_adjustment ?? "0.0000",
+        landscape: settings?.landscape_adjustment ?? "0.0000",
+      },
       papers: papers.map((paper) => ({ id: paper.id, name: paper.name, weight: paper.weight, category: paper.category, active: paper.active })),
       products: products.map((product) => ({
         id: product.id,

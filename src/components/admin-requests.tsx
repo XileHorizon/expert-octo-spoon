@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { REQUEST_STATUS_LABELS, type RequestStatus } from "@/lib/types";
 
 type Overview = {
   requests: { total: number; last24h: number; manualPricing: number; byStatus: Record<string, number>; needsAttention: number };
@@ -15,6 +16,9 @@ type RequestRow = {
   status: string;
   pricing_status: string;
   calculated_total: string | null;
+  calculated_subtotal?: string | null;
+  minimum_order_adjustment?: string | null;
+  shop_delivery_status?: string | null;
   created_at: string;
 };
 
@@ -48,14 +52,26 @@ type JobRow = {
 type Detail = {
   request: RequestRow & { phone: string | null; updated_at: string };
   jobs: JobRow[];
-  emails: { id: string; status: string; provider_message_id: string | null; error_message: string | null; created_at: string }[];
+  emails: { id: string; delivery_type: string; recipient: string | null; status: string; provider_message_id: string | null; error_message: string | null; created_at: string }[];
 };
 
-const STATUSES = ["received", "reviewing", "quoted", "closed", "intake_failed"] as const;
+const STATUSES = Object.keys(REQUEST_STATUS_LABELS) as RequestStatus[];
 
 const money = (value: string | null) => (value === null ? "Manual quote" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value)));
 const when = (value: string) => new Date(value).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
 const size = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.ceil(bytes / 1024))} KB`);
+const deliveryLabel = (status: string) => status === "provider_accepted"
+  ? "Provider accepted (inbox not confirmed)"
+  : status === "queued"
+    ? "Pending / reconciliation required"
+    : status.replaceAll("_", " ");
+
+export function artworkHandoffMessage(status?: string | null) {
+  if (status === "provider_accepted") return "Original files were accepted by the mail provider with the shop notification and are not retained by this portal. Inbox placement is not confirmed.";
+  if (status === "failed" || status === "not_configured") return "The shop file email was not accepted. This portal does not retain a downloadable production copy; contact the customer before proceeding.";
+  if (status === "queued") return "The shop email outcome requires reconciliation. Do not assume the provider accepted the files until the delivery audit is resolved.";
+  return "No shop file-handoff audit is available. Confirm receipt with the customer before proceeding.";
+}
 
 export function AdminRequests() {
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -113,11 +129,14 @@ export function AdminRequests() {
 
   if (loading && !overview) return <p className="admin-loading">Loading owner dashboard…</p>;
 
+  const shopDelivery = detail?.emails.find((email) => email.delivery_type === "shop_notification");
+  const artworkHandoff = artworkHandoffMessage(shopDelivery?.status);
+
   return <div className="admin-panel">
     {message && <div className="admin-message" role="status">{message}</div>}
 
     {overview && <section className="metric-grid">
-      <article><span>Needs attention</span><strong>{overview.requests.needsAttention}</strong><small>received or intake failed</small></article>
+      <article><span>Needs attention</span><strong>{overview.requests.needsAttention}</strong><small>new requests or email failures</small></article>
       <article><span>Last 24 hours</span><strong>{overview.requests.last24h}</strong><small>new requests</small></article>
       <article><span>Manual pricing</span><strong>{overview.requests.manualPricing}</strong><small>need a quoted rate</small></article>
       <article><span>All requests</span><strong>{overview.requests.total}</strong><small>lifetime</small></article>
@@ -129,7 +148,7 @@ export function AdminRequests() {
       <label>Status
         <select value={status} onChange={(event) => setStatus(event.target.value)}>
           <option value="all">All statuses</option>
-          {STATUSES.map((value) => <option key={value} value={value}>{value.replace("_", " ")}</option>)}
+          {STATUSES.map((value) => <option key={value} value={value}>{REQUEST_STATUS_LABELS[value]}</option>)}
         </select>
       </label>
       <label>Search
@@ -143,8 +162,8 @@ export function AdminRequests() {
       {rows.map((row) => <div className="request-row" role="row" key={row.id}>
         <span>{when(row.created_at)}</span>
         <span><strong>{row.customer_name}</strong><small>{row.organization || row.customer_email}</small></span>
-        <span><select value={row.status} onChange={(event) => void updateStatus(row.id, event.target.value)}>{STATUSES.map((value) => <option key={value} value={value}>{value.replace("_", " ")}</option>)}</select></span>
-        <span>{row.pricing_status === "priced" ? money(row.calculated_total) : "Manual quote"}</span>
+        <span><select value={row.status} onChange={(event) => void updateStatus(row.id, event.target.value)}>{STATUSES.map((value) => <option key={value} value={value}>{REQUEST_STATUS_LABELS[value]}</option>)}</select></span>
+        <span>{row.pricing_status === "priced" ? money(row.calculated_total) : "Manual quote"}{row.shop_delivery_status !== "provider_accepted" && <small>{row.shop_delivery_status === "queued" ? "Email audit pending" : "Email handoff needs review"}</small>}</span>
         <span><button type="button" onClick={() => void openDetail(row.id)}>Open</button></span>
       </div>)}
       <p className="request-count">{rows.length} of {total} requests</p>
@@ -164,6 +183,10 @@ export function AdminRequests() {
         <p><span>Organization</span><strong>{detail.request.organization || "Not provided"}</strong></p>
         <p><span>Received</span><strong>{when(detail.request.created_at)}</strong></p>
         <p><span>Estimated total</span><strong>{detail.request.pricing_status === "priced" ? money(detail.request.calculated_total) : "Manual quote"}</strong></p>
+        {detail.request.minimum_order_adjustment && <>
+          <p><span>Subtotal before minimum</span><strong>{money(detail.request.calculated_subtotal ?? null)}</strong></p>
+          <p><span>Minimum order adjustment</span><strong>{money(detail.request.minimum_order_adjustment)}</strong></p>
+        </>}
       </div>
 
       <h3>Files and production details</h3>
@@ -182,12 +205,12 @@ export function AdminRequests() {
         </div>
         {job.notes && <p className="detail-notes"><span>Customer notes</span>{job.notes}</p>}
         {job.pricing_reason && <p className="detail-notes"><span>Pricing note</span>{job.pricing_reason}</p>}
-        <p className="detail-notes"><span>Artwork handoff</span>Original files were delivered with the notification email and are not retained by this portal.</p>
+        <p className="detail-notes"><span>Artwork handoff</span>{artworkHandoff}</p>
       </article>)}
 
-      <h3>Notification delivery</h3>
-      {detail.emails.length === 0 ? <p className="empty">No delivery attempts recorded.</p> : <ul className="delivery-list">
-        {detail.emails.map((email) => <li key={email.id}><strong>{email.status.replace("_", " ")}</strong> · {when(email.created_at)}{email.error_message ? ` · ${email.error_message}` : ""}</li>)}
+      <h3>Notification handoff</h3>
+      {detail.emails.length === 0 ? <p className="empty">No handoff attempts recorded.</p> : <ul className="delivery-list">
+        {detail.emails.map((email) => <li key={email.id}><strong>{email.delivery_type === "customer_confirmation" ? "Customer confirmation" : "Shop notification"}: {deliveryLabel(email.status)}</strong> · {when(email.created_at)}{email.recipient ? ` · ${email.recipient}` : ""}{email.error_message ? ` · ${email.error_message}` : ""}</li>)}
       </ul>}
     </section>}
   </div>;

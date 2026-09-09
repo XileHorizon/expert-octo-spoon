@@ -63,6 +63,8 @@ export function getSeedCatalog(): Catalog {
   return {
     fixtureMode: demo,
     placeholderNotice: "Availability and any displayed demo prices must be confirmed by the owner before launch.",
+    minimumOrderTotal: "0.00",
+    modeAdjustments: { color: "0.0000", blackWhite: "0.0000", portrait: "0.0000", landscape: "0.0000" },
     papers: PAPERS.map(({ id, name, weight, category, active }) => ({ id, name, weight, category, active })),
     products: [{
       id: "print-products-initial",

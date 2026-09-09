@@ -862,6 +862,13 @@ button,input,select,textarea {
   font-weight: 600;
 }
 
+.summary-price > .summary-adjustment {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid color-mix(in srgb, var(--color-brand) 20%, transparent);
+  font-weight: 500;
+}
+
 .summary-price p {
   display: flex;
   align-items: baseline;

@@ -50,6 +50,17 @@ export function priceJob(job: QuoteJobInput, catalog: Catalog): JobPrice {
     lines.push({ label: `${paper.name} paper`, amount: money(paperCharge) });
   }
 
+  const colorRate = new Decimal(job.colorMode === "color" ? catalog.modeAdjustments.color : catalog.modeAdjustments.blackWhite);
+  const colorCharge = colorRate.times(units);
+  if (!colorCharge.isZero()) {
+    lines.push({ label: `${job.colorMode === "color" ? "Full color" : "Black & white"} adjustment`, amount: money(colorCharge) });
+  }
+  const orientationRate = new Decimal(job.orientation === "portrait" ? catalog.modeAdjustments.portrait : catalog.modeAdjustments.landscape);
+  const orientationCharge = orientationRate.times(units);
+  if (!orientationCharge.isZero()) {
+    lines.push({ label: `${job.orientation === "portrait" ? "Portrait" : "Landscape"} adjustment`, amount: money(orientationCharge) });
+  }
+
   // Discounts apply to printing and paper only, never to finishing or setup fees.
   const discountable = printing.plus(paperCharge);
   const pages = printedPages(job);
@@ -66,7 +77,7 @@ export function priceJob(job: QuoteJobInput, catalog: Catalog): JobPrice {
     lines.push({ label: `Bulk discount (${new Decimal(tier.discountPercent).toDecimalPlaces(2).toString()}% off)`, amount: `-${money(discount)}` });
   }
 
-  let total = discountable.minus(discount);
+  let total = discountable.minus(discount).plus(colorCharge).plus(orientationCharge);
 
   for (const id of job.finishingIds) {
     const option = catalog.finishing.find((item) => item.id === id && item.active);
@@ -88,5 +99,21 @@ export function priceQuote(jobs: QuoteJobInput[], catalog: Catalog): QuotePrice 
   const items = jobs.map((job) => priceJob(job, catalog));
   const pricedSubtotal = money(items.reduce((sum, item) => sum.plus(item.subtotal ?? 0), new Decimal(0)));
   const manualItem = items.some((item) => item.status === "manual");
-  return { status: manualItem ? "manual" : "priced", total: manualItem ? null : pricedSubtotal, pricedSubtotal, items };
+  if (manualItem) {
+    return { status: "manual", total: null, pricedSubtotal, subtotal: null, minimumOrderAdjustment: null, lines: [], items };
+  }
+
+  const subtotal = new Decimal(pricedSubtotal);
+  const minimum = new Decimal(catalog.minimumOrderTotal || 0);
+  const adjustment = items.length > 0 && minimum.greaterThan(0) && subtotal.lessThan(minimum) ? minimum.minus(subtotal) : null;
+  const lines = adjustment ? [{ label: "Minimum order adjustment", amount: money(adjustment) }] : [];
+  return {
+    status: "priced",
+    total: money(adjustment ? subtotal.plus(adjustment) : subtotal),
+    pricedSubtotal,
+    subtotal: pricedSubtotal,
+    minimumOrderAdjustment: adjustment ? money(adjustment) : null,
+    lines,
+    items,
+  };
 }

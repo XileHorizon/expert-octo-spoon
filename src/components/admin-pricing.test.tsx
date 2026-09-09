@@ -11,6 +11,8 @@ const config = {
   sizes: [],
   finishing: [],
   bulk_tiers: [],
+  minimum_order_total: "0.00",
+  mode_adjustments: { color: "0.0000", black_white: "0.0000", portrait: "0.0000", landscape: "0.0000" },
   in_use: { papers: [], sizes: [] },
 };
 
@@ -53,6 +55,18 @@ describe("AdminPricing toolbar", () => {
     expect(cancel.disabled).toBe(true);
     expect(save.disabled).toBe(true);
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("edits and saves explicit per-mode pricing adjustments", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(config)).mockResolvedValueOnce(jsonResponse({ saved: true })).mockResolvedValueOnce(jsonResponse(config));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AdminPricing section="options" />);
+    const color = await screen.findByRole("textbox", { name: "Full color surcharge" });
+    fireEvent.change(color, { target: { value: "0.075" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const request = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(JSON.parse(String(request.body)).mode_adjustments).toEqual({ color: "0.075", black_white: "0.0000", portrait: "0.0000", landscape: "0.0000" });
   });
 
   it("saves changes, exposes saving state, and announces success", async () => {

@@ -7,6 +7,7 @@ const FIELDS: { key: keyof BusinessSettings; label: string; hint?: string; type?
   { key: "contact_phone", label: "Support phone", hint: "Shown on the public quote summary." },
   { key: "contact_email", label: "Support email", type: "email", hint: "Shown on the public quote summary." },
   { key: "notification_target", label: "Quote notification recipient", type: "email", hint: "Leave blank to keep using the server-configured recipient." },
+  { key: "minimum_order_total", label: "Minimum order total", type: "number", hint: "Automatically priced quotes below this amount receive a visible adjustment. Enter 0 to disable; manual quotes are never adjusted." },
   { key: "standard_turnaround", label: "Standard turnaround label" },
   { key: "rush_turnaround", label: "Rush turnaround label" },
   { key: "support_copy", label: "Support heading" },
@@ -43,6 +44,11 @@ export function AdminSettings() {
       rush_turnaround: settings.rush_turnaround,
       support_copy: settings.support_copy,
       notification_target: settings.notification_target?.trim() ? settings.notification_target.trim() : null,
+      minimum_order_total: settings.minimum_order_total,
+      color_adjustment: settings.color_adjustment,
+      black_white_adjustment: settings.black_white_adjustment,
+      portrait_adjustment: settings.portrait_adjustment,
+      landscape_adjustment: settings.landscape_adjustment,
     };
     const response = await fetch("/api/admin/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const data = await response.json();
@@ -62,7 +68,7 @@ export function AdminSettings() {
         {field.label}
         {field.multiline
           ? <textarea rows={3} value={String(settings[field.key] ?? "")} onChange={(event) => setSettings({ ...settings, [field.key]: event.target.value })}/>
-          : <input type={field.type ?? "text"} value={String(settings[field.key] ?? "")} onChange={(event) => setSettings({ ...settings, [field.key]: event.target.value })}/>}
+          : <input type={field.type ?? "text"} min={field.key === "minimum_order_total" ? "0" : undefined} step={field.key === "minimum_order_total" ? "0.01" : undefined} value={String(settings[field.key] ?? "")} onChange={(event) => setSettings({ ...settings, [field.key]: event.target.value })}/>}
         {field.hint && <small>{field.hint}</small>}
       </label>)}
       <button type="button" className="save" onClick={() => void save()} disabled={busy}>{busy ? "Saving…" : "Save business settings"}</button>
