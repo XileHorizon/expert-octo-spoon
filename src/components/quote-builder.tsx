@@ -3,9 +3,10 @@
 import Image from "next/image";
 import { PDFDocument } from "pdf-lib";
 import { useMemo, useRef, useState } from "react";
-import { minimumForSize, isBusinessCardSize } from "@/lib/catalog";
+import { compatibleFinishingIds, finishingForSize, minimumForSize, isBusinessCardSize } from "@/lib/catalog";
 import { createClientUuid } from "@/lib/client-id";
 import { priceQuote } from "@/lib/pricing";
+import { readQuoteSubmissionResponse } from "@/lib/quote-submission-response";
 import { patchItemById, toggleExpandedId } from "@/lib/quote-state";
 import type { Catalog, QuoteJobInput } from "@/lib/types";
 import { ALLOWED_MIME_TYPES, MAX_FILE_BYTES, MAX_FILES, MAX_TOTAL_BYTES, estimateEncodedEmailBytes, maxRawBytesForEmail } from "@/lib/validation";
@@ -47,17 +48,19 @@ function FileConfiguration({ job, index, catalog, expanded, price, onToggle, onP
   const selectedMaterial = papers.find((item) => item.materialId === job.materialId);
   const minimum = minimumForSize(size, product.minimumQuantity);
   const businessCards = isBusinessCardSize(size);
-  const quickQuantities = businessCards ? [200, 250, 500, 1000] : [1, 10, 25, 50, 100, 250];
+  const availableFinishing = finishingForSize(catalog.finishing, size?.id);
+  const quickQuantities = (businessCards ? [200, 250, 500, 1000] : [1, 10, 25, 50, 100, 200, 250])
+    .filter((value) => value >= minimum && (!size?.maxAutoQuoteQuantity || value <= size.maxAutoQuoteQuantity));
 
   function changeProduct(productId: string) {
     const next = catalog.products.find((item) => item.id === productId)!;
     const nextSize = next.sizes.find((item) => item.active);
-    onPatch({ productId, sizeId: nextSize?.id ?? "", materialId: "", quantity: minimumForSize(nextSize, next.minimumQuantity), customWidth: undefined, customHeight: undefined, customUnits: undefined });
+    onPatch({ productId, sizeId: nextSize?.id ?? "", materialId: "", quantity: minimumForSize(nextSize, next.minimumQuantity), customWidth: undefined, customHeight: undefined, customUnits: undefined, finishingIds: compatibleFinishingIds(catalog.finishing, nextSize?.id, job.finishingIds) });
   }
 
   function changeSize(sizeId: string) {
     const nextSize = product.sizes.find((item) => item.id === sizeId);
-    onPatch({ sizeId, materialId: "", quantity: Math.max(job.quantity, minimumForSize(nextSize, product.minimumQuantity)), customWidth: undefined, customHeight: undefined, customUnits: undefined });
+    onPatch({ sizeId, materialId: "", quantity: Math.max(job.quantity, minimumForSize(nextSize, product.minimumQuantity)), customWidth: undefined, customHeight: undefined, customUnits: undefined, finishingIds: compatibleFinishingIds(catalog.finishing, sizeId, job.finishingIds) });
   }
 
   const summary = [size?.name ?? "Choose size", `${job.quantity.toLocaleString("en-US")} qty`, selectedMaterial?.name ?? "Choose paper", price.status === "priced" && price.subtotal ? currency(price.subtotal) : "Manual quote"];
@@ -85,13 +88,6 @@ function FileConfiguration({ job, index, catalog, expanded, price, onToggle, onP
         {businessCards && <p className="business-card-note">Minimum order: 200. Inquire for premium business card options.</p>}
       </div>
 
-      <div className="file-subsection">
-        <h3>Quantity</h3>
-        <div className="quantity-row"><div className="quantity-stepper"><button type="button" onClick={() => onPatch({ quantity: Math.max(minimum, job.quantity - 1) })}><Icon name="minus.svg" size={24}/></button><input aria-label={`Quantity for ${job.fileName}`} type="number" min={minimum} max="1000000" value={job.quantity} onChange={(event) => onPatch({ quantity: Number(event.target.value) })}/><button type="button" onClick={() => onPatch({ quantity: job.quantity + 1 })}><Icon name="plus.svg" size={24}/></button></div>
-        <div className="chip-row quantity-chips">{quickQuantities.map((quantity) => <button key={quantity} type="button" disabled={quantity < minimum} className={job.quantity === quantity ? "selected" : ""} onClick={() => onPatch({ quantity })}>{quantity === 250 && !businessCards ? "250+" : quantity}</button>)}</div></div>
-        <small className="minimum-copy">Minimum {minimum.toLocaleString("en-US")}</small>
-      </div>
-
       <div className="file-subsection options-card">
         <h3>Print options</h3>
         <label className="quote-field full icon-select"><span>Paper & Material Stock</span><span className="select-shell"><Icon name="file.svg" size={18}/><select value={job.materialId} onChange={(event) => onPatch({ materialId: event.target.value })}><option value="" disabled>{papers.length ? "Select paper/material" : "Paper/material options to be confirmed"}</option>{papers.map((item) => <option key={item.materialId} value={item.materialId}>{[item.name, item.weight].filter(Boolean).join(" ")}</option>)}</select></span></label>
@@ -101,8 +97,19 @@ function FileConfiguration({ job, index, catalog, expanded, price, onToggle, onP
           <div><span className="field-label">Printed Sides</span><div className="segmented"><button type="button" className={job.sides === 1 ? "active" : ""} onClick={() => onPatch({ sides: 1 })}>Single Sided</button><button type="button" className={job.sides === 2 ? "active" : ""} onClick={() => onPatch({ sides: 2 })}>Double Sided</button></div></div>
           <div><span className="field-label">Orientation</span><div className="segmented"><button type="button" className={job.orientation === "portrait" ? "active" : ""} onClick={() => onPatch({ orientation: "portrait" })}>Portrait</button><button type="button" className={job.orientation === "landscape" ? "active" : ""} onClick={() => onPatch({ orientation: "landscape" })}>Landscape</button></div></div>
         </div>
-        <div className="finishing"><span className="field-label">Select Finishing Touches</span><div className="finish-grid">{catalog.finishing.filter((item) => item.active).map((option) => { const checked = job.finishingIds.includes(option.id); return <label className={checked ? "checked" : ""} key={option.id}><input type="checkbox" checked={checked} onChange={() => onPatch({ finishingIds: checked ? job.finishingIds.filter((id) => id !== option.id) : [...job.finishingIds, option.id] })}/><span>{option.name}</span></label>; })}</div></div>
+        <div className="finishing"><span className="field-label">Select Finishing Touches</span><div className="finish-grid">{availableFinishing.map((option) => { const checked = job.finishingIds.includes(option.id); const informationId = `finishing-information-${job.clientId}-${option.id}`; return <article className="finish-option" key={option.id}>
+          <label className={checked ? "finish-selector checked" : "finish-selector"}><input type="checkbox" checked={checked} aria-describedby={checked && option.informationText ? informationId : undefined} onChange={() => onPatch({ finishingIds: checked ? job.finishingIds.filter((id) => id !== option.id) : [...job.finishingIds, option.id] })}/><strong>{option.name}</strong></label>
+          {checked && option.informationText && <div className="finish-information" id={informationId} role="note">{option.informationText}</div>}
+          {checked && option.imageUrl && option.imageAlt && <figure className="finish-guidance"><Image src={option.imageUrl} width={480} height={300} alt={option.imageAlt} unoptimized/></figure>}
+        </article>; })}</div></div>
         <label className="quote-field full"><span>Additional instructions (optional)</span><textarea className="instructions" value={job.notes ?? ""} maxLength={2000} placeholder="Folding guides, packaging details, deadlines, or other notes for this file." onChange={(event) => onPatch({ notes: event.target.value })}/></label>
+      </div>
+
+      <div className="file-subsection">
+        <h3>Quantity</h3>
+        <div className="quantity-row"><div className="quantity-stepper"><button type="button" onClick={() => onPatch({ quantity: Math.max(minimum, job.quantity - 1) })}><Icon name="minus.svg" size={24}/></button><input aria-label={`Quantity for ${job.fileName}`} type="number" min={minimum} max="1000000" value={job.quantity} onChange={(event) => onPatch({ quantity: Number(event.target.value) })}/><button type="button" onClick={() => onPatch({ quantity: job.quantity + 1 })}><Icon name="plus.svg" size={24}/></button></div>
+        <div className="chip-row quantity-chips">{quickQuantities.map((quantity) => <button key={quantity} type="button" disabled={quantity < minimum} className={job.quantity === quantity ? "selected" : ""} onClick={() => onPatch({ quantity })}>{quantity === 250 && !businessCards ? "250+" : quantity}</button>)}</div></div>
+        <small className="minimum-copy">Minimum {minimum.toLocaleString("en-US")}</small>
       </div>
 
       <div className={`file-estimate ${price.status}`}><span>{price.status === "priced" ? "Estimated price" : "Pricing"}</span><strong>{price.status === "priced" && price.subtotal ? currency(price.subtotal) : "Manual quote"}</strong>{price.reason && <small>{price.reason}</small>}</div>
@@ -177,11 +184,13 @@ export function QuoteBuilder({ initialCatalog, maxEmailBytes, contact }: { initi
     const form = new FormData(); form.set("payload", JSON.stringify(payload)); jobs.forEach((job) => form.append("files", job.file, job.file.name));
     try {
       const response = await fetch("/api/quote-requests", { method: "POST", body: form, headers: { "Idempotency-Key": idempotencyKey } });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "The request could not be submitted.");
+      const result = await readQuoteSubmissionResponse(response, contactPrompt);
+      if (!result.ok) return setError(result.error);
       submissionRef.current = null;
-      setSuccess({ requestId: data.requestId, pricingStatus: data.pricingStatus }); setJobs([]); setExpandedIds(new Set());
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "The request could not be submitted."); }
+      setSuccess({ requestId: result.requestId, pricingStatus: result.pricingStatus }); setJobs([]); setExpandedIds(new Set());
+    } catch {
+      setError(`The request could not reach the print service. Check your connection and try again. ${contactPrompt}`);
+    }
     finally { setBusy(false); }
   }
 
@@ -204,7 +213,7 @@ export function QuoteBuilder({ initialCatalog, maxEmailBytes, contact }: { initi
           {jobs.length > 0 && <div className="file-config-list"><h3>Uploaded Files ({jobs.length})</h3>{jobs.map((job, index) => <FileConfiguration key={job.clientId} job={job} index={index} catalog={catalog} expanded={expandedIds.has(job.clientId)} price={pricing.items[index]} onToggle={() => toggleJob(job.clientId)} onPatch={(patch) => patchJob(job.clientId, patch)} onRemove={() => removeJob(job.clientId)}/>)}</div>}
         </section>
 
-        <p className="fulfillment-disclaimer">Available options, turnaround times, and fulfillment arrangements vary by print type and will be confirmed when we review your request.</p>
+        <p className="fulfillment-disclaimer">This estimate is not final. If it is higher than expected, contact us—some bulk and account-negotiated discounts are not reflected here. Available options and fulfillment arrangements will be confirmed when we review your request.</p>
 
         <section className="quote-card">
           <SectionHeader number={2} title="Your Information" description="Who should we send the finalized pricing proposal to?"/>
@@ -213,7 +222,7 @@ export function QuoteBuilder({ initialCatalog, maxEmailBytes, contact }: { initi
 
         <section className="quote-card submit-card">
           {error && <div className="quote-error" role="alert">{error}</div>}{success && <div className="quote-success" role="status"><strong>Request received.</strong> Reference: {success.requestId}</div>}
-          <button className="quote-submit" disabled={busy || jobs.length === 0}>{busy ? "Submitting…" : "Submit Official Quote Request"}</button>
+          <button className="quote-submit" disabled={busy || jobs.length === 0}>{busy ? "Submitting…" : "Submit print request"}</button>
           <p className="secure-copy"><Icon name="shield-check.svg" size={24}/> Your files and full request are handed directly to the print team by email.</p>
         </section>
       </div>

@@ -1,4 +1,5 @@
 import mysql, { type Pool, type PoolConnection, type ResultSetHeader } from "mysql2/promise";
+import { databaseConnectionOptions } from "./database-config";
 
 type DatabaseRow = Record<string, unknown>;
 export type QueryResult<T extends DatabaseRow = DatabaseRow> = {
@@ -12,30 +13,12 @@ export type DatabaseClient = { query<T extends DatabaseRow = DatabaseRow>(sql: s
 
 declare global { var __shipPrintPool: Pool | undefined; }
 
-function databaseConfig() {
-  const uri = process.env.MYSQL_URL;
-  if (!uri) return null;
-  return {
-    uri,
-    max: Number(process.env.DATABASE_POOL_MAX ?? 10),
-    ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined,
-  };
-}
-
 export function getPool(): Pool | null {
-  const config = databaseConfig();
+  const config = databaseConnectionOptions(process.env, { pool: true });
   if (!config) return null;
   if (!globalThis.__shipPrintPool) {
     globalThis.__shipPrintPool = mysql.createPool({
-      uri: config.uri,
-      connectionLimit: config.max,
-      waitForConnections: true,
-      queueLimit: 0,
-      connectTimeout: 10_000,
-      timezone: "Z",
-      dateStrings: false,
-      ssl: config.ssl,
-      decimalNumbers: false,
+      ...config,
       typeCast(field, next) {
         if (field.type === "TINY" && field.length === 1) return field.string() === "1";
         return next();
@@ -45,7 +28,10 @@ export function getPool(): Pool | null {
   return globalThis.__shipPrintPool;
 }
 
-export function isDatabaseConfigured() { return Boolean(process.env.MYSQL_URL); }
+export function isDatabaseConfigured() {
+  try { return databaseConnectionOptions() !== null; }
+  catch { return false; }
+}
 
 function normalize<T extends DatabaseRow>(value: unknown): QueryResult<T> {
   if (Array.isArray(value)) return { rows: value as T[], rowCount: value.length, affectedRows: 0, insertId: 0 };
@@ -62,7 +48,7 @@ async function execute<T extends DatabaseRow>(executor: Pool | PoolConnection, s
 
 export async function query<T extends DatabaseRow = DatabaseRow>(sql: string, params: unknown[] = []) {
   const pool = getPool();
-  if (!pool) throw new Error("MYSQL_URL is not configured.");
+  if (!pool) throw new Error("Database credentials are not configured.");
   return execute<T>(pool, sql, params);
 }
 
@@ -76,7 +62,7 @@ export async function queryOne<T extends DatabaseRow = DatabaseRow>(sql: string,
 
 export async function transaction<T>(handler: (client: DatabaseClient) => Promise<T>): Promise<T> {
   const pool = getPool();
-  if (!pool) throw new Error("MYSQL_URL is not configured.");
+  if (!pool) throw new Error("Database credentials are not configured.");
   const connection = await pool.getConnection();
   const client: DatabaseClient = { query: (sql, params = []) => execute(connection, sql, params) };
   try {

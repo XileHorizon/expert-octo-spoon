@@ -30,7 +30,8 @@ function oracleItemCents(input: {
   perPieceFinish: string;
   flatFinish: string;
 }) {
-  const printedPages = BigInt(input.quantity * input.pages * input.sides);
+  // Sides remain a production detail; Ship Print prices both selections identically.
+  const printedPages = BigInt(input.quantity * input.pages);
   const pieces = BigInt(input.quantity);
   const discountable = (money4(input.base) + money4(input.paper)) * printedPages;
   const denominator = TEN_THOUSAND;
@@ -54,8 +55,8 @@ const catalog: Catalog = {
   papers: [],
   products: [{ id: "print", name: "Print", description: "", active: true, minimumQuantity: 1, sizes: [size] }],
   finishing: [
-    { id: "piece", name: "Per piece", unitPrice: "0.0315", chargeBasis: "per_piece", sizeIds: [], active: true },
-    { id: "flat", name: "Flat", unitPrice: "1.2375", chargeBasis: "flat_per_job", sizeIds: [], active: true },
+    { id: "piece", name: "Per piece", informationText: null, imageAlt: null, imageUrl: null, unitPrice: "0.0315", chargeBasis: "per_piece", sizeIds: [], active: true },
+    { id: "flat", name: "Flat", informationText: null, imageAlt: null, imageUrl: null, unitPrice: "1.2375", chargeBasis: "flat_per_job", sizeIds: [], active: true },
   ],
   bulkTiers: [{ id: "tier", minQuantity: 1, discountPercent: "7.25", quantityBasis: "printed_pages", sizeIds: [], active: true }],
 };

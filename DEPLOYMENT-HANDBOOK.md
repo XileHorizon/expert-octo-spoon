@@ -77,7 +77,7 @@ Get written approval for:
 - [ ] Owner portal email address
 - [ ] Quote-notification recipient
 - [ ] Authorized `From` address
-- [ ] SMTP/email provider
+- [ ] Email provider; use Resend HTTPS for Airo because outbound SMTP is blocked
 - [ ] Per-file and total upload limits
 - [ ] Maximum complete email-message size supported by both sender and recipient
 - [ ] Final product catalog, pricing, minimums, finishing options, discounts, and manual-quote items
@@ -87,9 +87,9 @@ Get written approval for:
 
 ### Critical upload/email decision
 
-The current application accepts up to 25 MB per file and 75 MB raw in one request, then sends the originals as MIME email attachments. MIME/base64 encoding increases the message size. Normal mail systems often accept much less than the application's raw cap; Gmail API uploads are commonly limited to about 35 MiB for the complete encoded request, and recipient limits may be lower.
+The current application accepts up to 25 MB per file and 75 MB raw in one request, then attaches the originals only to the shop notification. The separate customer confirmation has no attachments. MIME/base64 encoding increases message size. For Resend set `MAX_EMAIL_MESSAGE_BYTES=40000000`; the existing encoded-size calculation automatically lowers both UI and server raw caps, so this does **not** allow 40 MB of raw attachments. Recipient limits may be lower.
 
-Before launch, test the real sender and recipient with a near-limit message and set `MAX_EMAIL_MESSAGE_BYTES` to the lower proven complete-message limit. If the customer truly needs larger artwork, do not merely raise the number: implement approved secure file storage/download links instead of email attachments.
+Before launch, test the real sender and recipient with a near-limit message and use the lower proven complete-message limit. If the customer truly needs larger artwork, do not merely raise the number: implement approved secure file storage/download links instead of email attachments.
 
 ## 3. Production values you must prepare
 
@@ -97,28 +97,46 @@ Enter these through the hosting provider's secrets/environment-variable UI or a 
 
 Required:
 
-- `MYSQL_URL` — least-privilege application user, production database only
+- Database credentials — configure either `MYSQL_URL`, or the complete `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` set; `MYSQL_URL` wins when both are present
 - `APP_URL` — exact public HTTPS origin only; no credentials, path, query, or fragment
-- `EMAIL_FROM` — provider-authorized sender
+- `QUOTE_NOTIFICATION_FROM` — provider-authorized sender for the internal shop notification; a verified sending subdomain is suitable
+- `CUSTOMER_CONFIRMATION_FROM` — provider-authorized customer-facing sender; normally the mailbox where customer replies should arrive
+- `EMAIL_FROM` — optional backward-compatible fallback when either split sender above is absent
 - `QUOTE_NOTIFICATION_TO` — shop recipient
 - `MAX_EMAIL_MESSAGE_BYTES` — tested complete-message limit
 - `SESSION_COOKIE_SECURE=true`
-- `FIRST_OWNER_SETUP_SECRET` — at least 32 random characters, used only in the masked `/admin/setup` form and removed after first owner creation
 - `RESET_DELIVERY_WORKER_SECRET` — a separate permanent 32+ character secret shared only by the application and scheduled maintenance process
+
+Required temporarily for a new database:
+
+- `FIRST_OWNER_SETUP_SECRET` — at least 32 random characters, used only in the masked `/admin/setup` form; remove it and restart immediately after the first owner is created
 
 Choose one email path:
 
-- SMTP: `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, and when required `SMTP_USER` and `SMTP_PASS`
-- Gmail API: `GMAIL_OAUTH_TOKENS_PATH` to a private persistent token file
+- **Preferred for Airo/GoDaddy:** Resend HTTPS with `RESEND_API_KEY`; when present it takes precedence over stale SMTP/Gmail settings
+- SMTP with `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, and when required `SMTP_USER` and `SMTP_PASS`, only on hosts that permit outbound SMTP
+- Gmail API with `GMAIL_OAUTH_TOKENS_PATH` to a mode-`0600` token file only when the exact plan provides a private persistent writable path that survives builds and restarts; otherwise do not configure Gmail API
+
+Resend production sending requires every configured From domain or subdomain and sender to be verified/authorized. The internal notification keeps the customer as Reply-To; the customer confirmation uses its customer-facing sender as Reply-To. Both HTML messages embed the supplied PNG logo as an inline Content-ID image for Outlook-compatible rendering. Its Free tier currently permits 3,000 emails/month and 100/day. A successful quote normally consumes two messages (shop notification plus customer confirmation), leaving capacity for roughly 50 quote requests/day before password-reset email.
 
 Optional policy values:
 
+- `DB_PORT` — defaults to `3306` for the component database form
+- `DATABASE_SSL` — defaults false; set true only when the provider requires TLS
+- `DATABASE_POOL_MAX` — defaults to 10
 - `SESSION_TTL_HOURS`
 - `PASSWORD_RESET_TTL_MINUTES`
 - `PASSWORD_RESET_RESPONSE_FLOOR_MS` — bounded neutral-response floor; defaults to 750 ms and is clamped to 250–5000 ms
 - `BACKUP_DIR`
 - `BACKUP_RETAIN_DAYS`
 - `PORT` only when the host does not assign it automatically
+
+Automatically supplied by GoDaddy Node.js Hosting:
+
+- `PORT` — consumed automatically by `next start`; do not hard-code it
+- production runtime mode when the production start command runs
+
+GoDaddy does not automatically supply the application-specific database, base-URL, owner-setup, mail, or reset-worker values above. The app needs no separate session-signing or data-encryption environment variable: opaque session tokens are random and stored only as SHA-256 hashes, and submitted artwork is released after provider-accepted mail handoff rather than written to persistent disk.
 
 Production must not enable `ENABLE_LOCAL_DEV_INTAKE` or `NEXT_PUBLIC_ENABLE_DEMO_PRICING`.
 
@@ -138,7 +156,7 @@ Do not proceed unless every gate passes:
 
 - TypeScript
 - ESLint
-- 146 Vitest unit/component tests
+- 175 Vitest unit/component tests
 - 14 MySQL migration/intake integration checks
 - 19 MySQL schema/data checks
 - 8 operations checks
@@ -157,11 +175,13 @@ Then:
 
 Never deploy `.env.local`, `.local-data`, `node_modules`, test artifacts, logs, or customer uploads.
 
-For GoDaddy Node.js Hosting, upload only `release-artifacts/ship-print-esell-godaddy-node24.zip`. The ZIP has `package.json` at its root and includes a generated `db/godaddy-import.sql` fallback. GoDaddy's public product page currently advertises Node.js 22; this release declares and requires Node 24. Treat an offered Node 24 runtime as a hard qualification gate.
+For GoDaddy Node.js Hosting, upload only `release-artifacts/ship-print-esell-godaddy-node24.zip`. The ZIP has `package.json` and `GO-LIVE-CHECKLIST.md` at its root and includes a generated `db/godaddy-import.sql` fallback. GoDaddy's public product page currently advertises Node.js 22; this release declares and requires Node 24. Treat an offered Node 24 runtime as a hard qualification gate.
 
 ## 5. Use staging before production
 
-The safest first deployment is a provider preview URL or dedicated staging subdomain.
+The safest generic first deployment is a provider preview URL backed by a separate staging database, or a dedicated staging subdomain.
+
+**GoDaddy exception:** GoDaddy Preview and Published share the configured database. Do not treat its Preview as isolated staging and do not reset or reseed data for a preview test. Deploy additive code, run only non-destructive checks, and use a clearly labeled safe test quote that can remain in the shared database.
 
 1. Create a separate staging database and least-privilege staging user.
 2. Configure staging secrets with a staging `APP_URL` and a controlled notification recipient.
@@ -172,7 +192,7 @@ The safest first deployment is a provider preview URL or dedicated staging subdo
 7. Complete the smoke test in Section 8.
 8. Fix problems and repeat the local release gates before producing a new release commit.
 
-Never point staging at the production database.
+Never point an independently configurable staging environment at the production database. The GoDaddy shared Preview/Published database is the documented exception and must be handled non-destructively.
 
 ## 6. Generic managed-host deployment
 
@@ -198,7 +218,7 @@ npm run build
 10. Attach the staging domain first. Attach the production domain only after staging passes.
 11. Confirm the provider has issued a valid HTTPS certificate.
 
-With `FIRST_OWNER_SETUP_SECRET` configured, `/admin/setup` can initialize a **completely empty** MySQL 8 database, apply the rerunnable schema/seeds, and then create the first owner. It refuses unknown or partial databases and never drops data. If runtime DDL is blocked or initialization is interrupted, import the ZIP's `db/godaddy-import.sql` once through GoDaddy's Database SQL/import UI into a new empty database, then return to `/admin/setup`. MySQL DDL auto-commits, so never retry against a partial database by deleting or overwriting tables without an operator review.
+With `FIRST_OWNER_SETUP_SECRET` configured, `/admin/setup` can initialize a **completely empty** MySQL 8 database, apply the rerunnable schema/seeds, and then create the first owner. It refuses unknown or partial databases and never drops data. `npm run package:godaddy` reproducibly generates `db/godaddy-import.sql` inside the ZIP; no checkout copy is expected. If runtime DDL is blocked, import that generated file once through GoDaddy's Database SQL/import UI into a new empty database, then return to `/admin/setup`. MySQL DDL auto-commits, so never import over or reset a partial database; preserve it for operator review and complete it only with an approved migration path.
 
 ## 7. VPS deployment path
 

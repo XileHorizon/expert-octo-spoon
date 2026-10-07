@@ -51,7 +51,7 @@ verify:full does not use or stop a normal dev server: it uses a separate high ap
 
 ## Isolated MySQL test database
 
-The helper reads MYSQL_TEST_URL from the process environment, .env.local, or .env. The database name must end in _test. Each reset-based run checks connectivity and MySQL 8, drops all tables in that database, applies db/schema.sql, db/migrations/001-minimum-order-total.sql, db/migrations/002-same-day-release.sql, db/migrations/003-delivery-hardening.sql, and (when requested) both seed files. The suffix is a guard, not proof that a database is disposable; use a dedicated test database/user.
+The helper reads MYSQL_TEST_URL from the process environment, .env.local, or .env. The database name must end in _test. Each reset-based run checks connectivity and MySQL 8, drops all tables in that database, applies db/schema.sql, migrations 001 through 005 (including finishing content and auditable unit rates), and (when requested) both seed files. The suffix is a guard, not proof that a database is disposable; use a dedicated test database/user.
 
 The safe reference template is docs/test-env.example. It is not automatically loaded. Export it in a disposable shell after replacing its placeholder password, or let setup:local create .env.local:
 
@@ -64,9 +64,9 @@ Do not edit and commit the template with real values.
 
 ## Local email capture
 
-verify:full starts smtp-server on 127.0.0.1:32525 with optional auth and STARTTLS disabled. The app receives EMAIL_FROM=quotes@example.test and QUOTE_NOTIFICATION_TO=shop@example.test; raw messages are kept only in an in-memory inbox array. The verifier checks both messages, shop recipient, customer Reply-To, summary, three shop-only attachments, an attachment-free provisional customer acknowledgment, and transactionally prepared delivery records updated to provider_accepted. For password recovery it closes SMTP to force the first handoff to fail, confirms the durable queued state, restarts SMTP, rejects an unauthenticated worker call, and confirms an authenticated scheduled retry is delivered on attempt two. It finally closes SMTP again and checks that a failed shop handoff returns HTTP 502 while leaving the request visible in request_received.
+verify:full starts smtp-server on 127.0.0.1:32525 with optional auth and STARTTLS disabled. The app receives the backward-compatible EMAIL_FROM=quotes@example.test fallback and QUOTE_NOTIFICATION_TO=shop@example.test; raw messages are kept only in an in-memory inbox array. Focused email tests separately prove split sender selection. The verifier checks both messages, shop recipient, customer Reply-To, summary, three artwork attachments present only on the shop message, the inline PNG logo present on both HTML messages, a provisional customer acknowledgment without the original artwork, and transactionally prepared delivery records updated to provider_accepted. For password recovery it closes SMTP to force the first handoff to fail, confirms the durable queued state, restarts SMTP, rejects an unauthenticated worker call, and confirms an authenticated scheduled retry is delivered on attempt two. It finally closes SMTP again and checks that a failed shop handoff returns HTTP 502 while leaving the request visible in request_received.
 
-There is no mailbox UI, durable .eml artifact, or external delivery. For manual development, use a local capture service and set SMTP_HOST, SMTP_PORT, SMTP_SECURE=false, EMAIL_FROM, and QUOTE_NOTIFICATION_TO in ignored configuration. Never use production SMTP credentials for test submissions.
+There is no mailbox UI, durable .eml artifact, or external delivery. For manual development, use a local capture service and set SMTP_HOST, SMTP_PORT, SMTP_SECURE=false, QUOTE_NOTIFICATION_FROM, CUSTOMER_CONFIRMATION_FROM, and QUOTE_NOTIFICATION_TO in ignored configuration (or use EMAIL_FROM as the sender fallback). Never use production SMTP credentials for test submissions.
 
 ## Commands
 
@@ -105,7 +105,7 @@ The current package also defines npm run test:e2e and npm run test:e2e:ui. Playw
 - Wrong database targeted: stop immediately, preserve evidence, inspect .env.local, and follow the appropriate backup/recovery process. Do not reset that database.
 - Port conflict: dev:local normally uses 3000; verify:full needs its selected high port and 127.0.0.1:32525. Stop only a process you have identified.
 - Full verifier timeout: inspect its captured Next log, confirm dependencies/database/ports, and keep the app database disposable.
-- Mail failure: for verify:full, check port 32525 and that real SMTP variables are not overriding the harness. For manual testing, check local sink settings and EMAIL_FROM.
+- Mail failure: for verify:full, check port 32525 and that real SMTP variables are not overriding the harness. For manual testing, check the local sink and both split senders (or the `EMAIL_FROM` fallback).
 
 ## Actual limitations
 

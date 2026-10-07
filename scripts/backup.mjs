@@ -5,11 +5,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { createGzip } from "node:zlib";
+import { databaseCliIdentity } from "./database-config.mjs";
 
-if (!process.env.MYSQL_URL) { console.error("MYSQL_URL is not set."); process.exit(1); }
-const url = new URL(process.env.MYSQL_URL);
-if (url.protocol !== "mysql:") { console.error("MYSQL_URL must use mysql://."); process.exit(1); }
-const database = decodeURIComponent(url.pathname.replace(/^\//, ""));
+let identity;
+try { identity = databaseCliIdentity(); }
+catch (error) { console.error(error instanceof Error ? error.message : "Database configuration is invalid."); process.exit(1); }
+if (!identity) { console.error("Database credentials are not set. Configure MYSQL_URL or DB_HOST/DB_USER/DB_PASSWORD/DB_NAME."); process.exit(1); }
+const database = identity.database;
 const backupDir = process.env.BACKUP_DIR ?? "/var/backups/ship-print-esell";
 const retainDays = Number(process.env.BACKUP_RETAIN_DAYS ?? 30);
 mkdirSync(backupDir, { recursive: true, mode: 0o700 });
@@ -18,7 +20,7 @@ const target = path.join(backupDir, `db-${stamp}.sql.gz`);
 const partial = `${target}.part`;
 const temporary = mkdtempSync(path.join(tmpdir(), "ship-print-backup-"));
 const defaults = path.join(temporary, "client.cnf");
-writeFileSync(defaults, `[client]\nhost=${url.hostname}\nport=${url.port || "3306"}\nuser=${decodeURIComponent(url.username)}\npassword=${decodeURIComponent(url.password)}\n`, { mode: 0o600 });
+writeFileSync(defaults, `[client]\nhost=${identity.host}\nport=${identity.port}\nuser=${identity.user}\npassword=${identity.password}\n`, { mode: 0o600 });
 console.log(`[${new Date().toISOString()}] starting metadata backup`);
 try {
   await new Promise((resolve, reject) => {

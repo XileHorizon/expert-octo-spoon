@@ -7,7 +7,11 @@ import { deflateRawSync } from "node:zlib";
 
 const root = process.cwd();
 const outputDirectory = path.join(root, "release-artifacts");
-const outputPath = path.join(outputDirectory, "ship-print-esell-godaddy-node24.zip");
+const requestedFilename = process.argv[2] || "ship-print-esell-godaddy-node24.zip";
+if (path.basename(requestedFilename) !== requestedFilename || !/^[a-z0-9][a-z0-9._-]*\.zip$/i.test(requestedFilename)) {
+  throw new Error("Optional package filename must be a plain .zip basename.");
+}
+const outputPath = path.join(outputDirectory, requestedFilename);
 const temporaryPath = `${outputPath}.tmp`;
 const fixedDosDate = 0x0021; // 1980-01-01
 const fixedDosTime = 0x0000;
@@ -18,6 +22,7 @@ const rootFiles = [
   ".env.example",
   "DEPLOYMENT-HANDBOOK.md",
   "DEPLOYMENT.md",
+  "GO-LIVE-CHECKLIST.md",
   "README.md",
   "next.config.ts",
   "package-lock.json",
@@ -29,6 +34,7 @@ const operationsFiles = [
   "scripts/backup.mjs",
   "scripts/backup.sh",
   "scripts/create-owner.mjs",
+  "scripts/database-config.mjs",
   "scripts/init-db.mjs",
   "scripts/maintenance.mjs",
   "scripts/package-godaddy.mjs",
@@ -39,6 +45,8 @@ const databaseInitializationFiles = [
   "db/migrations/001-minimum-order-total.sql",
   "db/migrations/002-same-day-release.sql",
   "db/migrations/003-delivery-hardening.sql",
+  "db/migrations/004-finishing-content.sql",
+  "db/migrations/005-auditable-unit-rates.sql",
   "db/seed-required-catalog.sql",
   "db/seed-pricing-details.sql",
 ];
@@ -170,7 +178,7 @@ async function buildZip(files, generated) {
 try {
   const files = await collectFiles();
   const generated = await generatedEntries();
-  for (const required of ["package.json", "package-lock.json", ".env.example", "db/schema.sql", "scripts/init-db.mjs"]) {
+  for (const required of ["package.json", "package-lock.json", ".env.example", "GO-LIVE-CHECKLIST.md", "db/schema.sql", "scripts/init-db.mjs", "src/app/assets/ship-print-email-logo.png"]) {
     if (!files.includes(required)) throw new Error(`Required deployment file was excluded: ${required}`);
   }
   await mkdir(outputDirectory, { recursive: true });

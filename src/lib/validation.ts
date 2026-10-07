@@ -6,10 +6,12 @@ export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 export const MAX_TOTAL_BYTES = 75 * 1024 * 1024;
 /** Conservative default accepted by many SMTP/mailbox combinations; owner may lower it, never silently raise it. */
 export const DEFAULT_MAX_EMAIL_BYTES = 110 * 1024 * 1024;
+/** Resend's documented per-email maximum after Base64 attachment encoding. */
+export const RESEND_MAX_EMAIL_BYTES = 40_000_000;
 export const ALLOWED_MIME_TYPES = new Set(["application/pdf", "image/png", "image/jpeg"]);
 
-/** Base64 expands bytes 4/3, line wrapping adds ~2.6%, plus bounded headers/body overhead. */
-export function estimateEncodedEmailBytes(fileBytes: number, fileCount: number, bodyBytes = 32 * 1024) {
+/** Base64 expands bytes 4/3, line wrapping adds ~2.6%, plus bounded HTML, headers, and the inline PNG logo. */
+export function estimateEncodedEmailBytes(fileBytes: number, fileCount: number, bodyBytes = 160 * 1024) {
   const base64 = Math.ceil(fileBytes / 3) * 4;
   const lineWrapping = Math.ceil(base64 / 76) * 2;
   const perAttachmentHeaders = fileCount * 2048;
@@ -28,7 +30,8 @@ export function maxRawBytesForEmail(maxEmailBytes: number, fileCount: number) {
 
 export function configuredMaxEmailBytes() {
   const raw = Number(process.env.MAX_EMAIL_MESSAGE_BYTES ?? DEFAULT_MAX_EMAIL_BYTES);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_MAX_EMAIL_BYTES;
+  const configured = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_MAX_EMAIL_BYTES;
+  return process.env.RESEND_API_KEY?.trim() ? Math.min(configured, RESEND_MAX_EMAIL_BYTES) : configured;
 }
 
 export function uploadLimitProblem(fileBytes: number, fileCount: number, maxEmailBytes = configuredMaxEmailBytes()) {

@@ -17,15 +17,15 @@ die() { printf '\n\033[31mError: %s\033[0m\n\n' "$*" >&2; exit 1; }
 [ -f .env.local ] || die "No .env.local found. Copy .env.example to .env.local and fill it in first."
 
 set -a; . ./.env.local; set +a
-[ -n "${MYSQL_URL:-}" ] || die "MYSQL_URL is not set in .env.local"
-[ -n "${APP_URL:-}" ]      || die "APP_URL is not set in .env.local (password reset links need it)"
+[ -n "${MYSQL_URL:-}" ] || [ -n "${DB_HOST:-}" ] || die "Database credentials are not set in .env.local"
+[ -n "${APP_URL:-}" ] || die "APP_URL is not set in .env.local (password reset links need it)"
 
 command -v node >/dev/null || die "Node.js is not installed."
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
 [ "$NODE_MAJOR" -eq 24 ] || die "Node.js 24 is required (found $(node -v))."
 
 say "1/6  Checking the database connection"
-node --env-file-if-exists=.env.local -e 'const m=require("mysql2/promise");(async()=>{const c=await m.createConnection(process.env.MYSQL_URL);await c.query("select 1");await c.end()})().catch(()=>process.exit(1))' || die "Cannot connect using MYSQL_URL. Check the cPanel database, user grants, hostname, and port."
+node --env-file-if-exists=.env.local --input-type=module -e 'import mysql from "mysql2/promise"; import { databaseConnectionOptions } from "./scripts/database-config.mjs"; const options=databaseConnectionOptions(); if(!options) throw new Error("missing database credentials"); const c=await mysql.createConnection(options); await c.query("select 1"); await c.end();' || die "Cannot connect using the configured MySQL credentials. Check the cPanel database, user grants, hostname, and port."
 echo "     connected"
 
 say "2/6  Installing dependencies"
@@ -36,10 +36,13 @@ npm run db:init
 echo "     schema and required catalog mapping up to date"
 
 say "4/6  Checking email configuration"
-[ -n "${SMTP_HOST:-}" ] || die "SMTP_HOST is required because customer files are handed off by email."
-[ -n "${EMAIL_FROM:-}" ] || die "EMAIL_FROM is required."
+if [ -z "${RESEND_API_KEY:-}" ] && [ -z "${SMTP_HOST:-}" ] && [ -z "${GMAIL_OAUTH_TOKENS_PATH:-}" ]; then
+  die "Configure RESEND_API_KEY, SMTP_HOST, or GMAIL_OAUTH_TOKENS_PATH for email delivery."
+fi
+[ -n "${QUOTE_NOTIFICATION_FROM:-${EMAIL_FROM:-}}" ] || die "QUOTE_NOTIFICATION_FROM or fallback EMAIL_FROM is required."
+[ -n "${CUSTOMER_CONFIRMATION_FROM:-${EMAIL_FROM:-}}" ] || die "CUSTOMER_CONFIRMATION_FROM or fallback EMAIL_FROM is required."
 [ -n "${QUOTE_NOTIFICATION_TO:-}" ] || die "QUOTE_NOTIFICATION_TO is required."
-echo "     SMTP handoff configured"
+echo "     email handoff configured"
 
 say "5/6  Building"
 npm run build

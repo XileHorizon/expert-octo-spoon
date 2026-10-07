@@ -29,7 +29,7 @@ export function assertTestDatabaseUrl(url, productionUrl = process.env.MYSQL_URL
   return { parsed, database };
 }
 
-export async function openTestDatabase({ reset = true, seed = true } = {}) {
+export async function openTestDatabase({ reset = true, initialize = true, seed = true } = {}) {
   loadLocalEnv();
   const url = process.env.MYSQL_TEST_URL;
   if (!url) throw new Error("MYSQL_TEST_URL is not configured. On macOS run `npm run setup:local`; otherwise create a disposable MySQL 8 database whose name ends in `_test` and set MYSQL_TEST_URL.");
@@ -44,13 +44,17 @@ export async function openTestDatabase({ reset = true, seed = true } = {}) {
     const [tables] = await db.query("select table_name from information_schema.tables where table_schema = database()");
     for (const row of tables) await db.query(`drop table if exists \`${String(row.TABLE_NAME ?? row.table_name).replaceAll("`", "``")}\``);
     await db.query("set foreign_key_checks=1");
-    await db.query(readFileSync("db/schema.sql", "utf8"));
-    await db.query(readFileSync("db/migrations/001-minimum-order-total.sql", "utf8"));
-    await db.query(readFileSync("db/migrations/002-same-day-release.sql", "utf8"));
-    await db.query(readFileSync("db/migrations/003-delivery-hardening.sql", "utf8"));
-    if (seed) {
-      await db.query(readFileSync("db/seed-required-catalog.sql", "utf8"));
-      await db.query(readFileSync("db/seed-pricing-details.sql", "utf8"));
+    if (initialize) {
+      await db.query(readFileSync("db/schema.sql", "utf8"));
+      await db.query(readFileSync("db/migrations/001-minimum-order-total.sql", "utf8"));
+      await db.query(readFileSync("db/migrations/002-same-day-release.sql", "utf8"));
+      await db.query(readFileSync("db/migrations/003-delivery-hardening.sql", "utf8"));
+      await db.query(readFileSync("db/migrations/004-finishing-content.sql", "utf8"));
+      await db.query(readFileSync("db/migrations/005-auditable-unit-rates.sql", "utf8"));
+      if (seed) {
+        await db.query(readFileSync("db/seed-required-catalog.sql", "utf8"));
+        await db.query(readFileSync("db/seed-pricing-details.sql", "utf8"));
+      }
     }
   }
   return {

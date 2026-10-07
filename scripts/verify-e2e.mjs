@@ -19,6 +19,10 @@ try {
   await db.query(readFileSync("db/migrations/002-same-day-release.sql", "utf8"));
   await db.query(readFileSync("db/migrations/003-delivery-hardening.sql", "utf8"));
   await db.query(readFileSync("db/migrations/003-delivery-hardening.sql", "utf8"));
+  await db.query(readFileSync("db/migrations/004-finishing-content.sql", "utf8"));
+  await db.query(readFileSync("db/migrations/004-finishing-content.sql", "utf8"));
+  await db.query(readFileSync("db/migrations/005-auditable-unit-rates.sql", "utf8"));
+  await db.query(readFileSync("db/migrations/005-auditable-unit-rates.sql", "utf8"));
   await db.query(readFileSync("db/seed-required-catalog.sql", "utf8"));
   await db.query(readFileSync("db/seed-pricing-details.sql", "utf8"));
   check("schema and seeds are rerunnable", true);
@@ -28,13 +32,20 @@ try {
   const deliveryColumns = await db.query("select column_name from information_schema.columns where table_schema=database() and table_name='email_deliveries'");
   check("delivery type, recipient, and attempt sequence columns exist", ["delivery_type", "recipient", "attempt_sequence"].every((name) => deliveryColumns.rows.some((row) => (row.COLUMN_NAME ?? row.column_name) === name)));
   const tables = await db.query("select table_name from information_schema.tables where table_schema=database()");
-  const required = ["owners","owner_setup_state","owner_sessions","owner_password_resets","owner_password_reset_deliveries","products","sizes","materials","material_sizes","size_papers","bulk_tiers","bulk_tier_sizes","finishing_options","finishing_sizes","fulfillment_options","quote_requests","quote_jobs","email_deliveries","business_settings","admin_activity_log"];
+  const required = ["owners","owner_setup_state","owner_sessions","owner_password_resets","owner_password_reset_deliveries","products","sizes","materials","material_sizes","size_papers","bulk_tiers","bulk_tier_sizes","finishing_options","finishing_option_images","finishing_sizes","fulfillment_options","quote_requests","quote_jobs","email_deliveries","business_settings","admin_activity_log"];
   check(`all ${required.length} tables created`, required.every((name) => tables.rows.some((row) => row.TABLE_NAME === name || row.table_name === name)));
-  check("all seven required sizes seeded", Number((await db.query("select count(*) as n from sizes where product_id='10000000-0000-4000-8000-000000000001'")).rows[0].n) === 7);
-  check("all twelve paper mappings seeded", Number((await db.query("select count(*) as n from size_papers")).rows[0].n) === 12);
+  check("all nine required sizes seeded", Number((await db.query("select count(*) as n from sizes where product_id='10000000-0000-4000-8000-000000000001'")).rows[0].n) === 9);
+  check("all fourteen paper mappings seeded", Number((await db.query("select count(*) as n from size_papers")).rows[0].n) === 14);
+  check("all nineteen pricing rules seeded", Number((await db.query("select count(*) as n from bulk_tiers where id between '40000000-0000-4000-8000-000000000001' and '40000000-0000-4000-8000-000000000019'")).rows[0].n) === 19);
   await db.query("update sizes set base_price='9.8765' where id='20000000-0000-4000-8000-000000000001'");
+  await db.query("update sizes set max_auto_quote_quantity=250 where id='20000000-0000-4000-8000-000000000008'");
+  await db.query("update bulk_tiers set unit_price='0.1050' where id='40000000-0000-4000-8000-000000000002'");
+  await db.query(readFileSync("db/seed-required-catalog.sql", "utf8"));
   await db.query(readFileSync("db/seed-pricing-details.sql", "utf8"));
-  check("re-seeding preserves owner pricing", (await db.query("select base_price from sizes where id='20000000-0000-4000-8000-000000000001'")).rows[0].base_price === "9.8765");
+  const preserved = (await db.query("select base_price from sizes where id='20000000-0000-4000-8000-000000000001'")).rows[0].base_price === "9.8765"
+    && Number((await db.query("select max_auto_quote_quantity from sizes where id='20000000-0000-4000-8000-000000000008'")).rows[0].max_auto_quote_quantity) === 250
+    && (await db.query("select unit_price from bulk_tiers where id='40000000-0000-4000-8000-000000000002'")).rows[0].unit_price === "0.1050";
+  check("re-seeding preserves owner pricing, ceilings, and scoped rates", preserved);
 
   console.log("\nAuthentication data");
   const ownerId = randomUUID();
@@ -59,6 +70,10 @@ try {
   await db.query("insert into materials(id,product_id,name,active) values (?,?,'16pt Matte',true)", [materialId, productId]);
   await db.query("insert into size_papers(size_id,material_id,surcharge,is_standard,active) values (?,?,'0',true,true)", [sizeId, materialId]);
   await db.query("insert into finishing_options(id,name,unit_price,charge_basis,active) values (?,'Rounded','0.03','per_piece',true)", [finishId]);
+  await db.query("update finishing_options set information_text='Include bleed and cut lines.',image_alt='Bleed and cut line example' where id=?", [finishId]);
+  await db.query("insert into finishing_option_images(finishing_id,content_type,image_data,byte_size,width,height,content_hash) values (?,'image/png',?,4,1,1,?)", [finishId, Buffer.from([1,2,3,4]), sha("image")]);
+  const finishContent = (await db.query("select f.information_text,f.image_alt,i.byte_size from finishing_options f join finishing_option_images i on i.finishing_id=f.id where f.id=?", [finishId])).rows[0];
+  check("finishing guidance and image metadata persist", finishContent.information_text.includes("bleed") && finishContent.image_alt === "Bleed and cut line example" && Number(finishContent.byte_size) === 4);
   await db.query("insert into fulfillment_options(id,name,flat_price,active) values (?,'Pickup','0',true)", [fulfillmentId]);
   let negative = false;
   try { await db.query("insert into materials(id,product_id,name,unit_price) values (?,?,'Bad',-1)", [randomUUID(), productId]); } catch { negative = true; }

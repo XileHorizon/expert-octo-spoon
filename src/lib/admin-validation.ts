@@ -38,7 +38,9 @@ export const sizeDraftSchema = z.object({
   base_price: money,
   billing_unit: billingUnitSchema,
   minimum_quantity: z.number().int().min(1, "Minimum quantity must be at least 1.").max(1_000_000),
+  max_auto_quote_quantity: z.number().int().min(1).max(10_000_000).nullable(),
   manual_quote: z.boolean(),
+  manual_quote_message: z.string().trim().max(500).nullable(),
   included_note: z.string().trim().max(300).nullable(),
   active: z.boolean(),
   sort_order: z.number().int().min(0).max(100_000),
@@ -50,6 +52,9 @@ export const sizeDraftSchema = z.object({
   if (size.papers.filter((paper) => paper.is_standard && paper.active).length > 1) {
     ctx.addIssue({ code: "custom", path: ["papers"], message: `${size.name} can only have one standard paper.` });
   }
+  if (size.max_auto_quote_quantity !== null && size.max_auto_quote_quantity < size.minimum_quantity) {
+    ctx.addIssue({ code: "custom", path: ["max_auto_quote_quantity"], message: `Maximum auto-quote quantity for ${size.name} cannot be below its minimum.` });
+  }
   const ids = size.papers.map((paper) => paper.material_id);
   if (new Set(ids).size !== ids.length) {
     ctx.addIssue({ code: "custom", path: ["papers"], message: `${size.name} lists the same paper twice.` });
@@ -59,6 +64,9 @@ export const sizeDraftSchema = z.object({
 export const finishingDraftSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Give the option a name.").max(120),
+  information_text: z.string().trim().max(2000, "Finishing information must be 2,000 characters or fewer.").nullable(),
+  image_alt: z.string().trim().min(1, "Describe the example image for customers who cannot see it.").max(255).nullable(),
+  image_url: z.string().startsWith("/api/finishing-options/").max(512).nullable().optional(),
   unit_price: money,
   charge_basis: chargeBasisSchema,
   size_ids: z.array(z.string().uuid()).max(200),
@@ -69,12 +77,20 @@ export const finishingDraftSchema = z.object({
 export const bulkTierDraftSchema = z.object({
   id: z.string().uuid().optional(),
   min_quantity: z.number().int().min(1, "Thresholds start at 1.").max(10_000_000),
+  unit_price: money,
   discount_percent: percent,
   quantity_basis: quantityBasisSchema,
+  material_id: z.string().uuid().nullable(),
+  color_mode: z.enum(["color", "black-white"]).nullable(),
+  sides: z.union([z.literal(1), z.literal(2)]).nullable(),
   size_ids: z.array(z.string().uuid()).max(200),
   active: z.boolean(),
   sort_order: z.number().int().min(0).max(100_000),
-}).strict();
+}).strict().superRefine((tier, ctx) => {
+  if ((tier.unit_price === null) === (tier.discount_percent === null)) {
+    ctx.addIssue({ code: "custom", path: ["unit_price"], message: "Set either an exact unit rate or a discount, but not both." });
+  }
+});
 
 /** One atomic owner save. Everything succeeds together or nothing changes. */
 export const pricingDraftSchema = z.object({
@@ -98,7 +114,15 @@ export const pricingDraftSchema = z.object({
       }
     }
   }
-  const thresholds = draft.bulk_tiers.filter((tier) => tier.active).map((tier) => `${tier.quantity_basis}:${tier.min_quantity}`);
+  for (const tier of draft.bulk_tiers) {
+    if (tier.material_id && !paperIds.has(tier.material_id)) {
+      ctx.addIssue({ code: "custom", path: ["bulk_tiers"], message: "A pricing rule references a paper that no longer exists." });
+    }
+  }
+  const thresholds = draft.bulk_tiers.filter((tier) => tier.active).map((tier) => [
+    tier.unit_price === null ? "discount" : "rate", tier.quantity_basis, tier.min_quantity,
+    [...tier.size_ids].sort().join(","), tier.material_id ?? "*", tier.color_mode ?? "*", tier.sides ?? "*",
+  ].join(":"));
   if (new Set(thresholds).size !== thresholds.length) {
     ctx.addIssue({ code: "custom", path: ["bulk_tiers"], message: "Two active thresholds start at the same quantity." });
   }

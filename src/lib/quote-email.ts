@@ -4,6 +4,7 @@ import type { QuoteRequestInput } from "./validation";
 export type EmailBusinessSettings = {
   contactPhone: string;
   contactEmail: string;
+  /** Retained for settings/API/storage compatibility; customer emails no longer publish timing expectations. */
   turnaroundIntro: string;
   standardTurnaround: string;
   rushTurnaround: string;
@@ -13,6 +14,16 @@ const defaultBusiness: EmailBusinessSettings = {
   contactPhone: "", contactEmail: "", turnaroundIntro: "The print team will review your files and follow up.",
   standardTurnaround: "", rushTurnaround: "",
 };
+
+const BRAND = {
+  red: "#dd0f14",
+  redSoft: "#fff8f8",
+  page: "#f8fafc",
+  ink: "#292a32",
+  textSecondary: "#484950",
+  textMuted: "#818183",
+  border: "#cbd5e1",
+} as const;
 
 function fileSize(bytes: number) {
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -60,6 +71,7 @@ export function formatQuoteEmail(input: {
       `Pages: ${job.pageCount ?? "Unavailable / not applicable"}`,
       `Product: ${product?.name ?? job.productId}`,
       `Finished size: ${size?.name ?? job.sizeId}`,
+      ...(size?.dimensions ? [`Paper dimensions: ${size.dimensions}`] : []),
       `Material: ${material ? [material.name, material.weight].filter(Boolean).join(" ") : job.materialId}`,
       `Quantity: ${job.quantity.toLocaleString("en-US")}`,
       `Printed sides: ${job.sides === 1 ? "Single-sided" : "Double-sided"}`,
@@ -131,9 +143,7 @@ export function formatCustomerConfirmation(input: {
       : "Manual pricing is required. The shop will review the request before sending a final quote.",
     "",
     "WHAT HAPPENS NEXT",
-    business.turnaroundIntro,
-    ...(business.standardTurnaround ? [`Standard turnaround: ${business.standardTurnaround}`] : []),
-    ...(business.rushTurnaround ? [`Rush turnaround: ${business.rushTurnaround}`] : []),
+    "The print team will review your files and specifications before following up about the request.",
     "",
     "CONTACT",
     `Email: ${business.contactEmail || "Reply to this email"}`,
@@ -158,19 +168,19 @@ export function formatQuoteEmailHtml(summary: string) {
     if (!line) return '<tr><td style="height:10px;line-height:10px;font-size:1px">&nbsp;</td></tr>';
     const escaped = escapeHtml(line.trim());
     if (/^(CUSTOMER|ORDER \(.*\)|FILE \d+|SUMMARY|SHOP CONTACT|REQUEST SUMMARY|PRICING|WHAT HAPPENS NEXT|CONTACT)$/.test(line.trim())) {
-      return `<tr><td style="padding:18px 0 7px;color:#1d4ed8;font-family:Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase">${escaped}</td></tr>`;
+      return `<tr><td style="padding:20px 0 7px;color:${BRAND.red};font-family:Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase">${escaped}</td></tr>`;
     }
     if (/^\s+- /.test(line)) {
-      return `<tr><td style="padding:2px 0 2px 16px;color:#475569;font-family:Arial,sans-serif;font-size:14px;line-height:21px">&bull;&nbsp; ${escapeHtml(line.trim().slice(2))}</td></tr>`;
+      return `<tr><td style="padding:2px 0 2px 16px;color:${BRAND.textSecondary};font-family:Arial,sans-serif;font-size:14px;line-height:21px">&bull;&nbsp; ${escapeHtml(line.trim().slice(2))}</td></tr>`;
     }
     const separator = line.indexOf(":");
     if (separator > 0) {
       const label = escapeHtml(line.slice(0, separator));
       const value = escapeHtml(line.slice(separator + 1).trim());
-      return `<tr><td style="padding:4px 0;font-family:Arial,sans-serif;font-size:14px;line-height:21px"><span style="color:#64748b">${label}:</span> <strong style="color:#0f172a;font-weight:600">${value}</strong></td></tr>`;
+      return `<tr><td style="padding:4px 0;font-family:Arial,sans-serif;font-size:14px;line-height:21px"><span style="color:${BRAND.textMuted}">${label}:</span> <strong style="color:${BRAND.ink};font-weight:600">${value}</strong></td></tr>`;
     }
-    return `<tr><td style="padding:4px 0;color:#475569;font-family:Arial,sans-serif;font-size:14px;line-height:21px">${escaped}</td></tr>`;
+    return `<tr><td style="padding:4px 0;color:${BRAND.textSecondary};font-family:Arial,sans-serif;font-size:14px;line-height:21px">${escaped}</td></tr>`;
   }).join("");
 
-  return `<!doctype html><html><body style="margin:0;padding:0;background:#f1f5f9"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f1f5f9"><tr><td align="center" style="padding:28px 12px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:640px;background:#ffffff;border:1px solid #dbe3ee;border-radius:10px"><tr><td style="padding:24px 28px;background:#0f172a;border-radius:10px 10px 0 0"><div style="color:#93c5fd;font-family:Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:1.4px">SHIP PRINT eSELL</div><h1 style="margin:7px 0 0;color:#ffffff;font-family:Arial,sans-serif;font-size:23px;line-height:30px">${title}</h1></td></tr><tr><td style="padding:18px 28px 28px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">${body}</table></td></tr></table></td></tr></table></body></html>`;
+  return `<!doctype html><html><body style="margin:0;padding:0;background:${BRAND.page}"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:${BRAND.page}"><tr><td align="center" style="padding:28px 12px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:640px;background:#ffffff;border:1px solid ${BRAND.border};border-top:6px solid ${BRAND.red};border-radius:10px"><tr><td style="padding:24px 28px 20px;background:#ffffff;border-bottom:1px solid ${BRAND.border};border-radius:10px 10px 0 0"><img src="cid:ship-print-esell-logo" width="300" alt="Ship Print eSell" style="display:block;width:300px;max-width:100%;height:auto;border:0"><h1 style="margin:20px 0 0;color:${BRAND.ink};font-family:Arial,sans-serif;font-size:23px;line-height:30px">${title}</h1></td></tr><tr><td style="padding:18px 28px 28px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">${body}</table></td></tr><tr><td style="padding:14px 28px;background:${BRAND.redSoft};border-top:1px solid ${BRAND.border};color:${BRAND.textSecondary};font-family:Arial,sans-serif;font-size:12px;line-height:18px">Ship Print eSell &middot; Print requests reviewed by the Ship Print team</td></tr></table></td></tr></table></body></html>`;
 }

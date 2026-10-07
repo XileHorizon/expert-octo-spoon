@@ -8,10 +8,7 @@ const FIELDS: { key: keyof BusinessSettings; label: string; hint?: string; type?
   { key: "contact_email", label: "Support email", type: "email", hint: "Shown on the public quote summary." },
   { key: "notification_target", label: "Quote notification recipient", type: "email", hint: "Leave blank to keep using the server-configured recipient." },
   { key: "minimum_order_total", label: "Minimum order total", type: "number", hint: "Automatically priced quotes below this amount receive a visible adjustment. Enter 0 to disable; manual quotes are never adjusted." },
-  { key: "standard_turnaround", label: "Standard turnaround label" },
-  { key: "rush_turnaround", label: "Rush turnaround label" },
   { key: "support_copy", label: "Support heading" },
-  { key: "turnaround_intro", label: "Turnaround statement", multiline: true, hint: "Only publish commitments the shop can meet." },
 ];
 
 export function AdminSettings() {
@@ -39,6 +36,7 @@ export function AdminSettings() {
     const payload = {
       contact_phone: settings.contact_phone,
       contact_email: settings.contact_email,
+      // Preserve retired turnaround values so existing rows and API clients remain compatible.
       turnaround_intro: settings.turnaround_intro,
       standard_turnaround: settings.standard_turnaround,
       rush_turnaround: settings.rush_turnaround,
@@ -62,7 +60,7 @@ export function AdminSettings() {
 
   return <div className="admin-panel">
     {message && <div className="admin-message" role="status">{message}</div>}
-    <div className="admin-warning"><strong>Customer-facing copy:</strong> these values appear on the public quote form. Publish only commitments and contact details the shop has approved.</div>
+    <div className="admin-warning"><strong>Business settings:</strong> contact and pricing values may appear on the public quote form. Publish only details the shop has approved.</div>
     <section className="settings-form">
       {FIELDS.map((field) => <label key={field.key} className={field.multiline ? "wide" : ""}>
         {field.label}

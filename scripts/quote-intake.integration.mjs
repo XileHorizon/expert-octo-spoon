@@ -36,12 +36,18 @@ try {
   const migration = readFileSync("db/migrations/001-minimum-order-total.sql", "utf8");
   const releaseMigration = readFileSync("db/migrations/002-same-day-release.sql", "utf8");
   const hardeningMigration = readFileSync("db/migrations/003-delivery-hardening.sql", "utf8");
+  const finishingContentMigration = readFileSync("db/migrations/004-finishing-content.sql", "utf8");
+  const auditableRatesMigration = readFileSync("db/migrations/005-auditable-unit-rates.sql", "utf8");
   await primary.query(migration);
   await primary.query(migration);
   await primary.query(releaseMigration);
   await primary.query(releaseMigration);
   await primary.query(hardeningMigration);
   await primary.query(hardeningMigration);
+  await primary.query(finishingContentMigration);
+  await primary.query(finishingContentMigration);
+  await primary.query(auditableRatesMigration);
+  await primary.query(auditableRatesMigration);
   const columns = await primary.query(
     `select table_name,column_name,data_type,numeric_scale
        from information_schema.columns
@@ -52,6 +58,14 @@ try {
   check("minimum-order migration is rerunnable and creates all fixed-point columns",
     columns.rowCount === 3 && columns.rows.every((row) => (row.DATA_TYPE ?? row.data_type) === "decimal" && Number(row.NUMERIC_SCALE ?? row.numeric_scale) === 2),
     JSON.stringify(columns.rows));
+  const rateColumns = await primary.query(`select table_name,column_name from information_schema.columns where table_schema=database() and ((table_name='sizes' and column_name in ('max_auto_quote_quantity','manual_quote_message')) or (table_name='bulk_tiers' and column_name in ('material_id','color_mode','sides'))) `);
+  check("auditable-rates migration is rerunnable and creates scoped-rate and manual-ceiling columns", rateColumns.rowCount === 5, JSON.stringify(rateColumns.rows));
+  const seededPricing = await primary.query(`select
+    (select count(*) from bulk_tiers where unit_price is not null) as rates,
+    (select count(*) from sizes where id in ('20000000-0000-4000-8000-000000000008','20000000-0000-4000-8000-000000000009') and max_auto_quote_quantity=200) as capped_cards,
+    (select count(*) from sizes where id='20000000-0000-4000-8000-000000000006' and manual_quote=true and manual_quote_message like '%sent for approval%') as manual_business_cards`);
+  const seeded = seededPricing.rows[0];
+  check("required rates and manual quote policies are seeded", Number(seeded.rates) === 17 && Number(seeded.capped_cards) === 2 && Number(seeded.manual_business_cards) === 1, JSON.stringify(seeded));
 
   await primary.query("alter table quote_requests modify status enum('received','intake_failed','reviewing','quoted','closed','request_received','quote_sent','in_progress','awaiting_payment','fulfilled') not null");
   const legacy = ["received", "intake_failed", "reviewing", "quoted", "closed"];

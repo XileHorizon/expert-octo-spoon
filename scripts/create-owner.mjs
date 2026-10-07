@@ -5,7 +5,7 @@
  *   npm run create-owner -- owner@example.com
  *
  * The password is read from stdin (hidden) and never appears in shell history,
- * arguments, or logs. Requires MYSQL_URL in the environment or .env.local.
+ * arguments, or logs. Requires MYSQL_URL or complete DB_* credentials.
  */
 
 import { createInterface } from "node:readline";
@@ -13,6 +13,7 @@ import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import bcrypt from "bcryptjs";
 import mysql from "mysql2/promise";
+import { databaseConnectionOptions } from "./database-config.mjs";
 
 const MIN_PASSWORD_LENGTH = 12;
 
@@ -52,7 +53,13 @@ function passwordProblem(password) {
 
 const email = process.argv[2];
 if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) fail("Usage: npm run create-owner -- owner@example.com");
-if (!process.env.MYSQL_URL) fail("MYSQL_URL is not set. Run npm run setup:local or add it to .env.local.");
+let databaseOptions;
+try {
+  databaseOptions = databaseConnectionOptions(process.env, { connectionLimit: 2 });
+} catch (error) {
+  fail(error instanceof Error ? error.message : "Database configuration is invalid.");
+}
+if (!databaseOptions) fail("Database credentials are not set. Configure MYSQL_URL or DB_HOST/DB_USER/DB_PASSWORD/DB_NAME.");
 
 const password = await askHidden(`Password for ${email}: `);
 const confirm = await askHidden("Confirm password: ");
@@ -60,12 +67,7 @@ if (password !== confirm) fail("Passwords did not match.");
 const problem = passwordProblem(password);
 if (problem) fail(problem);
 
-const pool = mysql.createPool({
-  uri: process.env.MYSQL_URL,
-  connectionLimit: 2,
-  timezone: "Z",
-  ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined,
-});
+const pool = mysql.createPool(databaseOptions);
 
 try {
   const hash = await bcrypt.hash(password, 12);

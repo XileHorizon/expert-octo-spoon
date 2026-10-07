@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createFirstOwner, firstOwnerSetupAvailable, passwordProblem, safeEquals } from "@/lib/auth";
+import { databaseConfigurationProblem } from "@/lib/database-config";
 import { isDatabaseConfigured } from "@/lib/db";
 import { firstRunSetupAvailable, prepareFirstRunDatabase, UnsafeFirstRunDatabaseError } from "@/lib/first-run-bootstrap";
 
@@ -14,12 +15,16 @@ const schema = z.object({
 }).strict();
 
 export async function GET() {
+  const configurationProblem = databaseConfigurationProblem();
+  if (configurationProblem) return NextResponse.json({ available: false, error: configurationProblem }, { status: 503 });
   if (!isDatabaseConfigured()) return NextResponse.json({ available: false, error: "The database is not configured." }, { status: 503 });
   const configured = Boolean(process.env.FIRST_OWNER_SETUP_SECRET && process.env.FIRST_OWNER_SETUP_SECRET.length >= 32);
   return NextResponse.json({ available: configured && await firstRunSetupAvailable().catch(() => false) });
 }
 
 export async function POST(request: Request) {
+  const configurationProblem = databaseConfigurationProblem();
+  if (configurationProblem) return NextResponse.json({ error: configurationProblem }, { status: 503 });
   if (!isDatabaseConfigured()) return NextResponse.json({ error: "Owner setup is unavailable." }, { status: 503 });
   const deploymentSecret = process.env.FIRST_OWNER_SETUP_SECRET;
   if (!deploymentSecret || deploymentSecret.length < 32) {

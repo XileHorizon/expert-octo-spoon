@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { DEFAULT_MAX_EMAIL_BYTES, MAX_FILE_BYTES, MAX_TOTAL_BYTES, estimateEncodedEmailBytes, maxRawBytesForEmail, quoteRequestSchema, uploadLimitProblem } from "./validation";
+import { afterEach, describe, expect, it } from "vitest";
+import { DEFAULT_MAX_EMAIL_BYTES, MAX_FILE_BYTES, MAX_TOTAL_BYTES, RESEND_MAX_EMAIL_BYTES, configuredMaxEmailBytes, estimateEncodedEmailBytes, maxRawBytesForEmail, quoteRequestSchema, uploadLimitProblem } from "./validation";
+
+const originalEnv = { ...process.env };
+afterEach(() => { process.env = { ...originalEnv }; });
 
 const valid = { idempotencyKey: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", customer: { name: "Test User", email: "test@example.test" }, jobs: [{ clientId: "1", fileName: "a.pdf", fileSize: 100, mimeType: "application/pdf", pageCount: 1, productId: "p", sizeId: "s", materialId: "m", quantity: 200, sides: 1 as const, colorMode: "color" as const, orientation: "portrait" as const, finishingIds: [] }] };
 
@@ -22,5 +25,13 @@ describe("combined email attachment limit", () => {
     const cap = maxRawBytesForEmail(35 * 1024 * 1024, 3);
     expect(cap).toBeLessThan(MAX_TOTAL_BYTES);
     expect(estimateEncodedEmailBytes(cap, 3)).toBeLessThanOrEqual(35 * 1024 * 1024);
+  });
+  it("caps Resend at its encoded-message limit even when configuration is higher", () => {
+    process.env.RESEND_API_KEY = "test-key";
+    process.env.MAX_EMAIL_MESSAGE_BYTES = "115343360";
+    expect(configuredMaxEmailBytes()).toBe(RESEND_MAX_EMAIL_BYTES);
+    const rawCap = maxRawBytesForEmail(configuredMaxEmailBytes(), 2);
+    expect(rawCap).toBeLessThan(RESEND_MAX_EMAIL_BYTES);
+    expect(estimateEncodedEmailBytes(rawCap, 2)).toBeLessThanOrEqual(RESEND_MAX_EMAIL_BYTES);
   });
 });

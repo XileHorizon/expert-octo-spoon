@@ -4,6 +4,12 @@
 SET NAMES utf8mb4;
 SET time_zone = '+00:00';
 
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id VARCHAR(100) NOT NULL,
+  applied_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS owners (
   id CHAR(36) NOT NULL DEFAULT (UUID()),
   email VARCHAR(320) COLLATE utf8mb4_0900_ai_ci NOT NULL,
@@ -90,7 +96,9 @@ CREATE TABLE IF NOT EXISTS sizes (
   base_price DECIMAL(14,4) NULL CHECK (base_price IS NULL OR base_price >= 0),
   billing_unit ENUM('printed_page','piece','card','job') NOT NULL DEFAULT 'printed_page',
   minimum_quantity INT NOT NULL DEFAULT 1 CHECK (minimum_quantity > 0),
+  max_auto_quote_quantity INT NULL CHECK (max_auto_quote_quantity IS NULL OR max_auto_quote_quantity > 0),
   manual_quote BOOLEAN NOT NULL DEFAULT FALSE,
+  manual_quote_message VARCHAR(500) NULL,
   included_note TEXT NULL,
   active BOOLEAN NOT NULL DEFAULT FALSE,
   sort_order INT NOT NULL DEFAULT 0,
@@ -145,11 +153,16 @@ CREATE TABLE IF NOT EXISTS bulk_tiers (
   unit_price DECIMAL(14,4) NULL CHECK (unit_price IS NULL OR unit_price >= 0),
   discount_percent DECIMAL(5,2) NULL CHECK (discount_percent IS NULL OR (discount_percent >= 0 AND discount_percent <= 100)),
   quantity_basis ENUM('printed_pages','pieces') NOT NULL DEFAULT 'printed_pages',
+  material_id CHAR(36) NULL,
+  color_mode ENUM('color','black-white') NULL,
+  sides TINYINT NULL CHECK (sides IS NULL OR sides IN (1,2)),
   active BOOLEAN NOT NULL DEFAULT TRUE,
   sort_order INT NOT NULL DEFAULT 0,
   PRIMARY KEY (id),
-  UNIQUE KEY bulk_tiers_product_quantity_unique (product_id, min_quantity),
-  CONSTRAINT bulk_tiers_product_fk FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+  KEY bulk_tiers_product_quantity_idx (product_id, min_quantity),
+  KEY bulk_tiers_material_idx (material_id),
+  CONSTRAINT bulk_tiers_product_fk FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  CONSTRAINT bulk_tiers_material_fk FOREIGN KEY (material_id) REFERENCES materials(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS bulk_tier_sizes (
@@ -163,6 +176,8 @@ CREATE TABLE IF NOT EXISTS bulk_tier_sizes (
 CREATE TABLE IF NOT EXISTS finishing_options (
   id CHAR(36) NOT NULL DEFAULT (UUID()),
   name VARCHAR(255) NOT NULL,
+  information_text TEXT NULL,
+  image_alt VARCHAR(255) NULL,
   unit_price DECIMAL(14,4) NULL CHECK (unit_price IS NULL OR unit_price >= 0),
   charge_basis ENUM('per_piece','per_printed_page','flat_per_job') NOT NULL DEFAULT 'per_piece',
   active BOOLEAN NOT NULL DEFAULT FALSE,
@@ -170,6 +185,19 @@ CREATE TABLE IF NOT EXISTS finishing_options (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS finishing_option_images (
+  finishing_id CHAR(36) NOT NULL,
+  content_type ENUM('image/png','image/jpeg') NOT NULL,
+  image_data MEDIUMBLOB NOT NULL,
+  byte_size INT UNSIGNED NOT NULL,
+  width INT UNSIGNED NOT NULL,
+  height INT UNSIGNED NOT NULL,
+  content_hash CHAR(64) NOT NULL,
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (finishing_id),
+  CONSTRAINT finishing_option_images_option_fk FOREIGN KEY (finishing_id) REFERENCES finishing_options(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS finishing_sizes (

@@ -582,37 +582,87 @@ button,input,select,textarea {
 }
 
 .finish-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: var(--space-4);
 }
 
-.finish-grid label {
+.finish-option {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.finish-selector {
+  width: fit-content;
+  max-width: 100%;
   min-height: var(--control-height);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: 11px var(--space-4);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: var(--space-3);
-  font-size: var(--font-size-base);
-  line-height: 17px;
   color: var(--color-text-secondary);
   cursor: pointer;
 }
 
-.finish-grid label.checked {
+.finish-selector strong {
+  font-size: var(--font-size-base);
+  line-height: 17px;
+  overflow-wrap: anywhere;
+}
+
+.finish-selector.checked {
   border-color: var(--color-brand);
   background: var(--color-brand-soft);
   color: var(--color-text);
-  font-weight: 600;
 }
 
-.finish-grid input {
+.finish-selector:focus-within {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+.finish-selector input {
   width: 18px;
   height: 18px;
   margin: 0;
+  flex: 0 0 auto;
   accent-color: var(--color-brand);
+}
+
+.finish-information {
+  width: 100%;
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-soft);
+  color: var(--color-warning-text);
+  padding: var(--space-3) var(--space-4);
+  margin: 0;
+  white-space: pre-line;
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.finish-guidance {
+  width: 100%;
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.finish-guidance img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 260px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
 }
 
 .radio-cards {
@@ -1285,6 +1335,10 @@ button,input,select,textarea {
 
   .three-options {
     grid-template-columns: 1fr;
+  }
+
+  .finish-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .radio-cards {
@@ -2671,6 +2725,88 @@ button.primary:disabled,.portal-actions button:disabled,.portal-inline-add butto
 .size-picker input {
   width: auto;
   min-width: 0;
+}
+
+.finishing-editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.finishing-editor {
+  border: 1px solid var(--color-portal-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.finishing-editor-fields {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) repeat(3, minmax(130px, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.finishing-editor-fields>label,.option-media-editor>label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--color-portal-text);
+}
+
+.portal-field-wide textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
+.option-media-editor {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, 240px);
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.option-media-editor img {
+  width: 100%;
+  height: auto;
+  max-height: 180px;
+  object-fit: contain;
+  border: 1px solid var(--color-portal-border);
+  border-radius: var(--radius-sm);
+}
+
+.option-media-editor>small {
+  color: var(--color-portal-muted);
+}
+
+.option-media-editor .field-error {
+  color: var(--color-negative-text);
+}
+
+.media-upload-button {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-portal-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.media-upload-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+@media (max-width: 900px) {
+  .finishing-editor-fields,.option-media-editor { grid-template-columns: 1fr; }
 }
 
 .preview-card {

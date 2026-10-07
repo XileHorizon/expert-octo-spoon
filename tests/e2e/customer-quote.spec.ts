@@ -8,7 +8,7 @@ test.describe("customer quote request", () => {
     await artworkInput(page).setInputFiles(validPdf);
     await expect(page.getByText("customer-artwork.pdf", { exact: true })).toBeVisible();
     await page.getByLabel("Full Name *").fill("E2E Customer"); await page.getByLabel("Email Address *").fill("customer@example.test");
-    await page.getByRole("button", { name: "Submit Official Quote Request" }).click();
+    await page.getByRole("button", { name: "Submit print request" }).click();
     await expect(page.getByRole("alert").filter({ hasText: /Choose a paper\/material for customer-artwork.pdf/i })).toBeVisible();
   });
 
@@ -17,7 +17,7 @@ test.describe("customer quote request", () => {
     await page.getByLabel("Paper & Material Stock").selectOption({ index: 1 });
     await page.getByLabel("Full Name *").fill("E2E Customer"); await page.getByLabel("Company Name (Optional)").fill("Example Print Co.");
     await page.getByLabel("Email Address *").fill("customer@example.test"); await page.getByLabel("Phone Number").fill("614-555-0100");
-    await page.getByRole("button", { name: "Submit Official Quote Request" }).click();
+    await page.getByRole("button", { name: "Submit print request" }).click();
     await expect(page.getByRole("status")).toContainText("Request received."); await expect(page.getByRole("status")).toContainText("e2e-request-123");
   });
 
@@ -40,9 +40,9 @@ test.describe("customer quote request", () => {
     await page.getByLabel("Paper & Material Stock").selectOption({ index: 1 });
     await page.getByLabel("Full Name *").fill("Retry Customer");
     await page.getByLabel("Email Address *").fill("retry@example.test");
-    await page.getByRole("button", { name: "Submit Official Quote Request" }).click();
-    await expect(page.locator(".quote-error")).toContainText(/failed to fetch|request could not be submitted/i);
-    await page.getByRole("button", { name: "Submit Official Quote Request" }).click();
+    await page.getByRole("button", { name: "Submit print request" }).click();
+    await expect(page.locator(".quote-error")).toContainText(/request could not reach the print service/i);
+    await page.getByRole("button", { name: "Submit print request" }).click();
     await expect(page.getByRole("status")).toContainText("e2e-retry-123");
 
     expect(keys).toHaveLength(2);

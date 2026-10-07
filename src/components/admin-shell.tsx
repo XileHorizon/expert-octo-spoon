@@ -24,7 +24,7 @@ const PRICING_SECTIONS: {
   { id: "papers", label: "Paper types", icon: "file" },
   { id: "sizes", label: "Sizes & pricing", icon: "tag" },
   { id: "options", label: "Print options & finishing", icon: "sliders" },
-  { id: "discounts", label: "Bulk discounts", icon: "percent" },
+  { id: "discounts", label: "Unit rates & bulk pricing", icon: "percent" },
 ];
 
 const Icon = ({ name }: { name: string }) => {

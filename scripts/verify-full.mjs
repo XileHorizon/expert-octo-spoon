@@ -18,6 +18,7 @@ import { spawn } from "node:child_process";
 import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { deflateSync } from "node:zlib";
 import { SMTPServer } from "smtp-server";
 import { openTestDatabase, loadLocalEnv } from "./mysql-test-helper.mjs";
 
@@ -68,11 +69,52 @@ function pdf(name) {
   return new File([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0x25, 0xe2, 0xe3, 0xcf, 0xd3])], name, { type: "application/pdf" });
 }
 
+const crcTable = Array.from({ length: 256 }, (_, value) => {
+  let crc = value;
+  for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+  return crc >>> 0;
+});
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 0xff];
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function pngChunk(type, data) {
+  const typeBytes = Buffer.from(type, "ascii");
+  const result = Buffer.alloc(12 + data.length);
+  result.writeUInt32BE(data.length, 0); typeBytes.copy(result, 4); data.copy(result, 8);
+  result.writeUInt32BE(crc32(Buffer.concat([typeBytes, data])), 8 + data.length);
+  return result;
+}
+function png(name, width = 1, height = 1) {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4);
+  header.set([8, 6, 0, 0, 0], 8);
+  const scanlines = Buffer.alloc(height * (1 + width * 4));
+  for (let row = 0; row < height; row += 1) scanlines[row * (1 + width * 4)] = 0;
+  const bytes = Buffer.concat([
+    Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]),
+    pngChunk("IHDR", header), pngChunk("IDAT", deflateSync(scanlines)), pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+  return new File([bytes], name, { type: "image/png" });
+}
+
 try {
   console.log("\n\x1b[1mPreparing an isolated environment\x1b[0m");
   loadLocalEnv();
-  db = await openTestDatabase({ reset: true, seed: false });
+  db = await openTestDatabase({ reset: true, initialize: false });
   console.log("  MySQL 8 test database ready");
+
+  const useComponentDatabaseConfig = process.env.VERIFY_DATABASE_COMPONENTS === "true";
+  const testDatabaseUrl = new URL(process.env.MYSQL_TEST_URL);
+  const runtimeDatabaseEnv = useComponentDatabaseConfig ? {
+    MYSQL_URL: "",
+    DB_HOST: testDatabaseUrl.hostname,
+    DB_PORT: testDatabaseUrl.port || "3306",
+    DB_USER: decodeURIComponent(testDatabaseUrl.username),
+    DB_PASSWORD: decodeURIComponent(testDatabaseUrl.password),
+    DB_NAME: decodeURIComponent(testDatabaseUrl.pathname.replace(/^\//, "")),
+  } : { MYSQL_URL: process.env.MYSQL_TEST_URL };
 
   // --- SMTP sink ----------------------------------------------------------
   smtp = new SMTPServer({
@@ -90,9 +132,9 @@ try {
   // --- application --------------------------------------------------------
   const env = {
     ...process.env,
+    ...runtimeDatabaseEnv,
     NODE_ENV: "development",
     PORT: String(APP_PORT),
-    MYSQL_URL: process.env.MYSQL_TEST_URL,
     APP_URL: BASE,
     SMTP_HOST: "127.0.0.1",
     SMTP_PORT: String(SMTP_PORT),
@@ -220,7 +262,7 @@ try {
       { name: "Legal", dimensions: "8.5 × 14", base_price: "0.16", billing_unit: "printed_page", minimum_quantity: 1, manual_quote: false, included_note: "Included: Standard 22 lb", active: true, sort_order: 1, papers: [{ material_id: legalPaperId, surcharge: "0", is_standard: true, active: true }] },
       { name: "Business Cards", dimensions: "3.5 × 2", base_price: "0.20", billing_unit: "card", minimum_quantity: 200, manual_quote: false, included_note: "Included: Cardstock 100 lb", active: true, sort_order: 2, papers: [{ material_id: cardPaperId, surcharge: "0", is_standard: true, active: true }] },
     ],
-    finishing: [{ name: "Rounded corners", unit_price: "0.03", charge_basis: "per_piece", size_ids: [], active: true, sort_order: 0 }],
+    finishing: [{ name: "Rounded corners", information_text: "Keep artwork inside the cut line.", image_alt: null, unit_price: "0.03", charge_basis: "per_piece", size_ids: [], active: true, sort_order: 0 }],
     bulk_tiers: [{ min_quantity: 1000, discount_percent: "5", quantity_basis: "printed_pages", size_ids: [], active: true, sort_order: 0 }],
   });
   check("sizes, paper mappings, options, and discounts save atomically", configured.status === 200, JSON.stringify(configured.body));
@@ -232,6 +274,41 @@ try {
   check("three independent sizes created", [letterIdSaved, legalIdSaved, cardsIdSaved].every(Boolean));
   check("size-specific paper mappings created", config.sizes.every((size) => size.papers.length === 1));
   check("finishing option created", Boolean(finishingId));
+
+  const spoofedImage = new FormData();
+  spoofedImage.set("file", new File([Buffer.from("not an image")], "fake.png", { type: "image/png" }));
+  spoofedImage.set("altText", "Cut line example");
+  const rejectedImage = await call(`/api/admin/finishing-options/${finishingId}/image`, { method: "PUT", body: spoofedImage });
+  check("finishing image upload rejects spoofed content", rejectedImage.status === 422);
+
+  const imageUpload = new FormData();
+  imageUpload.set("file", png("cut-lines.png"));
+  imageUpload.set("altText", "Bleed and cut line example");
+  const uploadedImage = await call(`/api/admin/finishing-options/${finishingId}/image`, { method: "PUT", body: imageUpload });
+  const uploadedImageBody = await json(uploadedImage);
+  check("authenticated owner uploads a finishing example image", uploadedImage.status === 200 && uploadedImageBody?.imageUrl?.includes(finishingId), JSON.stringify(uploadedImageBody));
+  const servedImage = await call(uploadedImageBody.imageUrl);
+  const imageEtag = servedImage.headers.get("etag");
+  check("public finishing image route serves only the stored image type", servedImage.status === 200 && servedImage.headers.get("content-type") === "image/png" && servedImage.headers.get("x-content-type-options") === "nosniff");
+  const cachedImage = await call(uploadedImageBody.imageUrl, { headers: { "if-none-match": imageEtag } });
+  check("public finishing image route supports immutable version caching", cachedImage.status === 304);
+
+  const replacement = new FormData();
+  replacement.set("file", png("cut-lines-wide.png", 2, 1));
+  replacement.set("altText", "Updated bleed and cut line example");
+  const replacedImage = await call(`/api/admin/finishing-options/${finishingId}/image`, { method: "PUT", body: replacement });
+  const replacedImageBody = await json(replacedImage);
+  check("owner can replace image bytes and alt text with a new version URL", replacedImage.status === 200 && replacedImageBody.imageUrl !== uploadedImageBody.imageUrl && replacedImageBody.imageAlt.startsWith("Updated"));
+
+  const removedImage = await call(`/api/admin/finishing-options/${finishingId}/image`, { method: "DELETE" });
+  check("owner can delete a finishing example image", removedImage.status === 200 && (await json(removedImage))?.removed === true);
+  check("deleted finishing image is no longer public", (await call(replacedImageBody.imageUrl)).status === 404);
+
+  const restoredImage = new FormData();
+  restoredImage.set("file", png("cut-lines.png"));
+  restoredImage.set("altText", "Bleed and cut line example");
+  const restored = await call(`/api/admin/finishing-options/${finishingId}/image`, { method: "PUT", body: restoredImage });
+  check("finishing example image can be restored", restored.status === 200);
 
   const editableDraft = (source) => ({
     papers: structuredClone(source.papers),
@@ -260,6 +337,8 @@ try {
   check("minimum order total is published with the catalog", catalog?.minimumOrderTotal === "100.00", catalog?.minimumOrderTotal);
   check("color and orientation adjustments are published", catalog?.modeAdjustments?.color === "0.0500" && catalog?.modeAdjustments?.landscape === "0.0200", JSON.stringify(catalog?.modeAdjustments));
   check("size-specific paper relationships are published", catalog?.products?.[0]?.sizes?.find((item) => item.id === legalId)?.papers?.some((item) => item.materialId === legalPaperId));
+  const publicFinishing = catalog?.finishing?.find((item) => item.id === finishingId);
+  check("catalog publishes finishing guidance, alt text, and only a versioned image URL", publicFinishing?.informationText?.includes("cut line") && publicFinishing?.imageAlt === "Bleed and cut line example" && publicFinishing?.imageUrl?.includes("?v=") && !("imageData" in publicFinishing));
 
   // ------------------------------------------------------ quote submission
   console.log("\n\x1b[1mQuote submission\x1b[0m");
@@ -337,7 +416,9 @@ try {
     ["minimum order adjustment", /Minimum order adjustment: \$/],
   ]) check(`email includes ${label}`, pattern.test(message));
   check("all three originals attached only to shop notification", (message.match(/Content-Disposition: attachment/gi) ?? []).length === 3);
-  check("customer confirmation has no attachments", (customerMessage.match(/Content-Disposition: attachment/gi) ?? []).length === 0);
+  check("shop email embeds the PNG logo inline", /Content-ID:\s*<ship-print-esell-logo>/i.test(message) && /Content-Disposition:\s*inline/i.test(message));
+  check("customer confirmation has no artwork attachments", (customerMessage.match(/Content-Disposition: attachment/gi) ?? []).length === 0);
+  check("customer confirmation embeds the PNG logo inline", /Content-ID:\s*<ship-print-esell-logo>/i.test(customerMessage) && /Content-Disposition:\s*inline/i.test(customerMessage));
   const decodedCustomerMessage = customerMessage.replace(/=\r?\n/g, "");
   check("customer confirmation is provisional and references the request", /not a final quote/i.test(decodedCustomerMessage) && decodedCustomerMessage.includes(requestId));
 
@@ -382,12 +463,12 @@ try {
 
   // ------------------------------------------------------- history safety
   console.log("\n\x1b[1mHistory protection\x1b[0m");
-  const removalDraft = editableDraft(config);
+  const removalDraft = editableDraft(await json(await call("/api/admin/config")));
   removalDraft.sizes = removalDraft.sizes.filter((size) => size.id !== letterId);
   const removeUsed = await saveDraft(removalDraft);
   check("size used by a quote cannot be deleted", removeUsed.status === 409, `${removeUsed.status} ${JSON.stringify(removeUsed.body)}`);
 
-  const deactivateDraft = editableDraft(config);
+  const deactivateDraft = editableDraft(await json(await call("/api/admin/config")));
   deactivateDraft.sizes = deactivateDraft.sizes.map((size) => size.id === letterId ? { ...size, active: false } : size);
   const deactivate = await saveDraft(deactivateDraft);
   check("referenced size can still be deactivated", deactivate.status === 200, `${deactivate.status} ${JSON.stringify(deactivate.body)}`);

@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import mysql from "mysql2/promise";
+import { databaseConnectionOptions } from "./database-config.mjs";
 if (process.env.MAINTENANCE_SKIP_ENV_FILE !== "true") {
   for (const file of [".env.local", ".env"]) {
     const full = path.join(process.cwd(), file); if (!existsSync(full)) continue;
@@ -10,8 +11,11 @@ if (process.env.MAINTENANCE_SKIP_ENV_FILE !== "true") {
   }
 }
 const apply = process.argv.includes("--apply");
-if (!process.env.MYSQL_URL) { console.error("MYSQL_URL is not set."); process.exit(1); }
-const pool = mysql.createPool({ uri: process.env.MYSQL_URL, connectionLimit: 2, timezone: "Z", ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined });
+let databaseOptions;
+try { databaseOptions = databaseConnectionOptions(process.env, { connectionLimit: 2 }); }
+catch (error) { console.error(error instanceof Error ? error.message : "Database configuration is invalid."); process.exit(1); }
+if (!databaseOptions) { console.error("Database credentials are not set. Configure MYSQL_URL or DB_HOST/DB_USER/DB_PASSWORD/DB_NAME."); process.exit(1); }
+const pool = mysql.createPool(databaseOptions);
 const log = (message) => console.log(`[${new Date().toISOString()}] ${message}`);
 try {
   const [[sessions]] = await pool.query("select count(*) as n from owner_sessions where expires_at < utc_timestamp(3)");

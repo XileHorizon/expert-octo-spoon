@@ -18,9 +18,9 @@ const catalog: Catalog = {
   modeAdjustments: { color: "0", blackWhite: "0", portrait: "0", landscape: "0" },
   products: [{ id: "p", name: "P", description: "", active: true, minimumQuantity: 1, sizes: [letter, poster] }],
   finishing: [
-    { id: "fold", name: "Folding", unitPrice: "0.04", chargeBasis: "per_piece", sizeIds: ["letter"], active: true },
-    { id: "setup", name: "File setup", unitPrice: "12.00", chargeBasis: "flat_per_job", sizeIds: [], active: true },
-    { id: "binding", name: "Binding", unitPrice: "3.50", chargeBasis: "flat_per_job", sizeIds: ["legal"], active: true },
+    { id: "fold", name: "Folding", informationText: null, imageAlt: null, imageUrl: null, unitPrice: "0.04", chargeBasis: "per_piece", sizeIds: ["letter"], active: true },
+    { id: "setup", name: "File setup", informationText: null, imageAlt: null, imageUrl: null, unitPrice: "12.00", chargeBasis: "flat_per_job", sizeIds: [], active: true },
+    { id: "binding", name: "Binding", informationText: null, imageAlt: null, imageUrl: null, unitPrice: "3.50", chargeBasis: "flat_per_job", sizeIds: ["legal"], active: true },
   ],
   bulkTiers: [
     { id: "t1", minQuantity: 100, discountPercent: "5", quantityBasis: "printed_pages", sizeIds: ["letter"], active: true },
@@ -61,8 +61,21 @@ describe("pricing", () => {
     expect(priceJob({ ...job, colorMode: "black-white", orientation: "landscape" }, catalog).subtotal).toBe("2.00");
   });
 
-  it("bills double-sided as two printed pages", () => {
-    expect(priceJob({ ...job, sides: 2 }, catalog).subtotal).toBe("4.00");
+  it("keeps double-sided pricing identical to single-sided pricing", () => {
+    expect(priceJob({ ...job, sides: 2 }, catalog).subtotal).toBe(priceJob({ ...job, sides: 1 }, catalog).subtotal);
+    expect(priceJob({ ...job, sides: 2 }, catalog).subtotal).toBe("2.00");
+  });
+
+  it("ignores legacy side-specific rates when pricing a double-sided job", () => {
+    const sideScopedCatalog: Catalog = {
+      ...catalog,
+      bulkTiers: [
+        { id: "single", minQuantity: 1, unitPrice: "0.20", discountPercent: null, quantityBasis: "printed_pages", materialId: null, colorMode: null, sides: 1, sizeIds: ["letter"], active: true },
+        { id: "double", minQuantity: 1, unitPrice: "0.90", discountPercent: null, quantityBasis: "printed_pages", materialId: null, colorMode: null, sides: 2, sizeIds: ["letter"], active: true },
+      ],
+    };
+    expect(priceJob({ ...job, sides: 1 }, sideScopedCatalog).subtotal).toBe("2.00");
+    expect(priceJob({ ...job, sides: 2 }, sideScopedCatalog).subtotal).toBe("2.00");
   });
 
   it("applies only the highest qualifying discount to printing and paper", () => {

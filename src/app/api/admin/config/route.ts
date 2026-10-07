@@ -9,7 +9,8 @@ export const dynamic = "force-dynamic";
 
 type SizeRow = {
   id: string; product_id: string; name: string; dimensions: string | null; base_price: string | null;
-  billing_unit: string; minimum_quantity: number; manual_quote: boolean; included_note: string | null;
+  billing_unit: string; minimum_quantity: number; max_auto_quote_quantity: number | null;
+  manual_quote: boolean; manual_quote_message: string | null; included_note: string | null;
   active: boolean; sort_order: number;
 };
 
@@ -53,11 +54,13 @@ export async function GET() {
   try {
     const [papers, sizes, sizePapers, finishing, finishingSizes, tiers, tierSizes, usage, settings] = await Promise.all([
       queryRows("select id,name,weight,category,active,sort_order from materials order by sort_order, name"),
-      queryRows<SizeRow>("select id,product_id,name,dimensions,base_price,billing_unit,minimum_quantity,manual_quote,included_note,active,sort_order from sizes order by sort_order, name"),
+      queryRows<SizeRow>("select id,product_id,name,dimensions,base_price,billing_unit,minimum_quantity,max_auto_quote_quantity,manual_quote,manual_quote_message,included_note,active,sort_order from sizes order by sort_order, name"),
       queryRows<{ size_id: string; material_id: string; surcharge: string | null; is_standard: boolean; active: boolean }>("select size_id,material_id,surcharge,is_standard,active from size_papers order by sort_order"),
-      queryRows("select id,name,unit_price,charge_basis,active,sort_order from finishing_options order by sort_order, name"),
+      queryRows(`select f.id,f.name,f.information_text,f.image_alt,f.unit_price,f.charge_basis,f.active,f.sort_order,
+        case when i.content_hash is null then null else concat('/api/finishing-options/',f.id,'/image?v=',i.content_hash) end as image_url
+        from finishing_options f left join finishing_option_images i on i.finishing_id=f.id order by f.sort_order,f.name`),
       queryRows<{ finishing_id: string; size_id: string }>("select finishing_id,size_id from finishing_sizes"),
-      queryRows("select id,min_quantity,discount_percent,quantity_basis,active,sort_order from bulk_tiers order by min_quantity"),
+      queryRows("select id,min_quantity,unit_price,discount_percent,quantity_basis,material_id,color_mode,sides,active,sort_order from bulk_tiers order by sort_order,min_quantity"),
       queryRows<{ tier_id: string; size_id: string }>("select tier_id,size_id from bulk_tier_sizes"),
       queryRows<{ material_id: string; size_id: string }>("select distinct material_id, size_id from quote_jobs"),
       queryRows<{ minimum_order_total: string; color_adjustment: string; black_white_adjustment: string; portrait_adjustment: string; landscape_adjustment: string }>("select minimum_order_total,color_adjustment,black_white_adjustment,portrait_adjustment,landscape_adjustment from business_settings where id = 1"),
@@ -112,10 +115,10 @@ export async function PUT(request: Request) {
       const keptSizes: string[] = [];
       for (const [index, size] of draft.sizes.entries()) {
         const id = size.id ?? randomUUID();
-        const values = [size.name, size.dimensions, size.base_price, size.billing_unit, size.minimum_quantity, size.manual_quote, size.included_note, size.active, index];
+        const values = [size.name, size.dimensions, size.base_price, size.billing_unit, size.minimum_quantity, size.max_auto_quote_quantity, size.manual_quote, size.manual_quote_message, size.included_note, size.active, index];
         if (size.id) await assertExisting(client, "sizes", id, productId);
-        if (size.id) await client.query("update sizes set name=?, dimensions=?, base_price=?, billing_unit=?, minimum_quantity=?, manual_quote=?, included_note=?, active=?, sort_order=? where id=? and product_id=?", [...values, id, productId]);
-        else await client.query("insert into sizes(id,product_id,name,dimensions,base_price,billing_unit,minimum_quantity,manual_quote,included_note,active,sort_order) values (?,?,?,?,?,?,?,?,?,?,?)", [id, productId, ...values]);
+        if (size.id) await client.query("update sizes set name=?, dimensions=?, base_price=?, billing_unit=?, minimum_quantity=?, max_auto_quote_quantity=?, manual_quote=?, manual_quote_message=?, included_note=?, active=?, sort_order=? where id=? and product_id=?", [...values, id, productId]);
+        else await client.query("insert into sizes(id,product_id,name,dimensions,base_price,billing_unit,minimum_quantity,max_auto_quote_quantity,manual_quote,manual_quote_message,included_note,active,sort_order) values (?,?,?,?,?,?,?,?,?,?,?,?,?)", [id, productId, ...values]);
         keptSizes.push(id);
       }
 
@@ -137,8 +140,12 @@ export async function PUT(request: Request) {
       for (const [index, option] of draft.finishing.entries()) {
         const id = option.id ?? randomUUID();
         if (option.id) await assertExisting(client, "finishing_options", id);
-        if (option.id) await client.query("update finishing_options set name=?, unit_price=?, charge_basis=?, active=?, sort_order=? where id=?", [option.name, option.unit_price, option.charge_basis, option.active, index, id]);
-        else await client.query("insert into finishing_options(id,name,unit_price,charge_basis,active,sort_order) values (?,?,?,?,?,?)", [id, option.name, option.unit_price, option.charge_basis, option.active, index]);
+        if (option.id) await client.query("update finishing_options set name=?,information_text=?,image_alt=?,unit_price=?,charge_basis=?,active=?,sort_order=? where id=?", [option.name, option.information_text, option.image_alt, option.unit_price, option.charge_basis, option.active, index, id]);
+        else await client.query("insert into finishing_options(id,name,information_text,image_alt,unit_price,charge_basis,active,sort_order) values (?,?,?,?,?,?,?,?)", [id, option.name, option.information_text, option.image_alt, option.unit_price, option.charge_basis, option.active, index]);
+        if (!option.image_alt) {
+          const image = await client.query("select finishing_id from finishing_option_images where finishing_id=?", [id]);
+          if (image.rows.length) throw new Error("IMAGE_ALT");
+        }
         keptFinishing.push(id);
         await client.query("delete from finishing_sizes where finishing_id=?", [id]);
         for (const sizeId of option.size_ids) if (keptSizes.includes(sizeId)) await client.query("insert ignore into finishing_sizes(finishing_id,size_id) values (?,?)", [id, sizeId]);
@@ -149,8 +156,8 @@ export async function PUT(request: Request) {
       for (const [index, tier] of draft.bulk_tiers.entries()) {
         const id = tier.id ?? randomUUID();
         if (tier.id) await assertExisting(client, "bulk_tiers", id);
-        if (tier.id) await client.query("update bulk_tiers set min_quantity=?, discount_percent=?, quantity_basis=?, active=?, sort_order=?, unit_price=null where id=?", [tier.min_quantity, tier.discount_percent, tier.quantity_basis, tier.active, index, id]);
-        else await client.query("insert into bulk_tiers(id,product_id,min_quantity,discount_percent,quantity_basis,active,sort_order) values (?,null,?,?,?,?,?)", [id, tier.min_quantity, tier.discount_percent, tier.quantity_basis, tier.active, index]);
+        if (tier.id) await client.query("update bulk_tiers set min_quantity=?,unit_price=?,discount_percent=?,quantity_basis=?,material_id=?,color_mode=?,sides=?,active=?,sort_order=? where id=?", [tier.min_quantity, tier.unit_price, tier.discount_percent, tier.quantity_basis, tier.material_id, tier.color_mode, tier.sides, tier.active, index, id]);
+        else await client.query("insert into bulk_tiers(id,product_id,min_quantity,unit_price,discount_percent,quantity_basis,material_id,color_mode,sides,active,sort_order) values (?,null,?,?,?,?,?,?,?,?,?)", [id, tier.min_quantity, tier.unit_price, tier.discount_percent, tier.quantity_basis, tier.material_id, tier.color_mode, tier.sides, tier.active, index]);
         keptTiers.push(id);
         await client.query("delete from bulk_tier_sizes where tier_id=?", [id]);
         for (const sizeId of tier.size_ids) if (keptSizes.includes(sizeId)) await client.query("insert ignore into bulk_tier_sizes(tier_id,size_id) values (?,?)", [id, sizeId]);
@@ -165,7 +172,9 @@ export async function PUT(request: Request) {
     });
   } catch (error) {
     if (error instanceof Error && error.message === "STALE") return NextResponse.json({ error: "Someone else changed this pricing. Reload before saving again." }, { status: 409 });
-    const message = error instanceof Error && error.message === "HISTORY"
+    const message = error instanceof Error && error.message === "IMAGE_ALT"
+      ? "Nothing was saved. Add alt text for every finishing option that has an example image."
+      : error instanceof Error && error.message === "HISTORY"
       ? "Nothing was saved. Deactivate records used by past quotes instead of removing them."
       : "Nothing was saved. Check every pricing selection and try again.";
     return NextResponse.json({ error: message }, { status: 409 });

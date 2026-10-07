@@ -17,7 +17,7 @@ const catalog: Catalog = {
   minimumOrderTotal: "0.00",
   papers: [{ id: "matte", name: "16pt Matte", weight: "16 pt", category: "Matte", active: true }],
   products: [{ id: "cards", name: "Business Cards", description: "", active: true, minimumQuantity: 200, sizes: [size] }],
-  finishing: [{ id: "rounded", name: "Rounded corners", active: true, unitPrice: "0.03", chargeBasis: "per_piece", sizeIds: [] }],
+  finishing: [{ id: "rounded", name: "Rounded corners", active: true, informationText: null, imageAlt: null, imageUrl: null, unitPrice: "0.03", chargeBasis: "per_piece", sizeIds: [] }],
   bulkTiers: [],
 };
 
@@ -31,7 +31,7 @@ describe("formatQuoteEmail", () => {
   it("includes complete customer, per-file production, and pricing details", () => {
     const pricing = priceQuote(payload.jobs, catalog);
     const email = formatQuoteEmail({ requestId: "quote-123", payload, pricing, catalog });
-    for (const detail of ["Reference: quote-123", "Name: Kevin", "Organization: Acme", "Original: front.pdf", "Pages: 2", "Product: Business Cards", "Finished size: 3.5 × 2", "Material: 16pt Matte", "Quantity: 200", "Printed sides: Double-sided", "Ink colorway: Full Color (CMYK)", "Orientation: Landscape", "Finishing: Rounded corners", "Notes: Keep colors vivid", "Estimated total: $46.00"]) {
+    for (const detail of ["Reference: quote-123", "Name: Kevin", "Organization: Acme", "Original: front.pdf", "Pages: 2", "Product: Business Cards", "Finished size: 3.5 × 2", "Paper dimensions: 3.5 × 2", "Material: 16pt Matte", "Quantity: 200", "Printed sides: Double-sided", "Ink colorway: Full Color (CMYK)", "Orientation: Landscape", "Finishing: Rounded corners", "Notes: Keep colors vivid", "Estimated total: $46.00"]) {
       expect(email).toContain(detail);
     }
   });
@@ -62,10 +62,17 @@ describe("formatQuoteEmail", () => {
     expect(html).toContain("Kevin &amp; Co");
     expect(html).toContain("quote-&lt;123&gt;");
     expect(html).toContain("Estimated total:");
+    expect(html).toContain('src="cid:ship-print-esell-logo"');
+    expect(html).toContain('width="300"');
+    expect(html).toContain('alt="Ship Print eSell"');
+    expect(html).toContain("#dd0f14");
+    expect(html).toContain("#292a32");
+    expect(html).not.toContain("#1d4ed8");
+    expect(html).not.toContain("#0f172a");
     expect(html).not.toContain("Kevin & Co");
   });
 
-  it("creates a customer confirmation with reference, provisional language, summary, and contact details", () => {
+  it("creates a customer confirmation without legacy delivery-time expectations", () => {
     const text = formatCustomerConfirmation({
       requestId: "quote-123", payload, pricing: priceQuote(payload.jobs, catalog), catalog,
       business: { contactPhone: "555-0100", contactEmail: "shop@example.test", turnaroundIntro: "We review within one business day.", standardTurnaround: "3-5 days", rushTurnaround: "1-2 days" },
@@ -73,5 +80,9 @@ describe("formatQuoteEmail", () => {
     for (const detail of ["Reference: quote-123", "not a final quote", "front.pdf", "Provisional estimate", "shop@example.test", "original files are not attached"]) {
       expect(text).toContain(detail);
     }
+    for (const removed of ["one business day", "Standard turnaround", "3-5 days", "Rush turnaround", "1-2 days"]) {
+      expect(text).not.toContain(removed);
+    }
+    expect(text).toContain("review your files and specifications before following up");
   });
 });

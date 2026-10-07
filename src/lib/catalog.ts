@@ -12,6 +12,7 @@ const PAPERS: (Material & { sizes: string[] })[] = [
   { id: "poster-24x36-tbc", name: "Paper options to be confirmed", weight: null, category: null, active: true, sizes: ["poster-24x36"] },
   { id: "business-card-50", name: "Business card stock", weight: "50 lb", category: "Cover stock", active: true, sizes: ["business-card"] },
   { id: "business-card-100", name: "Business card stock", weight: "100 lb", category: "Cover stock", active: true, sizes: ["business-card"] },
+  { id: "card-stock", name: "Card stock", weight: null, category: "Card", active: true, sizes: ["card-5x7", "card-4x6"] },
   { id: "custom-tbc", name: "Paper options to be confirmed", weight: null, category: null, active: true, sizes: ["custom"] },
 ];
 
@@ -21,8 +22,10 @@ const SIZES: { id: string; name: string; dimensions: string; billingUnit: Billin
   { id: "tabloid", name: "Tabloid", dimensions: "11 × 17", billingUnit: "printed_page", minimum: 1, manual: false },
   { id: "poster-18x24", name: "Poster", dimensions: "18 × 24", billingUnit: "piece", minimum: 1, manual: true },
   { id: "poster-24x36", name: "Large Poster", dimensions: "24 × 36", billingUnit: "piece", minimum: 1, manual: true },
-  { id: "business-card", name: "Business Cards", dimensions: "3.5 × 2", billingUnit: "card", minimum: 200, manual: false },
+  { id: "business-card", name: "Business Cards", dimensions: "3.5 × 2", billingUnit: "card", minimum: 200, manual: true },
   { id: "custom", name: "Custom", dimensions: "Custom", billingUnit: "piece", minimum: 1, manual: true, custom: true },
+  { id: "card-5x7", name: "5 × 7 Cards", dimensions: "5 × 7", billingUnit: "card", minimum: 1, manual: false },
+  { id: "card-4x6", name: "4 × 6 Cards", dimensions: "4 × 6", billingUnit: "card", minimum: 1, manual: false },
 ];
 
 /**
@@ -54,7 +57,9 @@ export function getSeedCatalog(): Catalog {
       basePrice: size.manual ? null : demo ? (demoBase[size.id] ?? null) : null,
       billingUnit: size.billingUnit,
       minimumQuantity: size.minimum,
+      maxAutoQuoteQuantity: size.id === "card-5x7" || size.id === "card-4x6" ? 200 : null,
       manualQuote: size.manual,
+      manualQuoteMessage: size.id === "business-card" ? "Pricing will be sent for approval." : size.id === "card-5x7" || size.id === "card-4x6" ? "Quantities of 201 or more are quoted manually." : null,
       includedNote: standard ? `Included: ${[standard.name, standard.weight].filter(Boolean).join(" ")} paper, black-and-white, single-sided` : null,
       papers,
     };
@@ -75,10 +80,10 @@ export function getSeedCatalog(): Catalog {
       sizes,
     }],
     finishing: [
-      { id: "double-sided", name: "Double-sided printing", unitPrice: demo ? "0.06" : null, chargeBasis: "per_printed_page", sizeIds: ["letter", "legal", "tabloid"], active: true },
-      { id: "folding", name: "Folding", unitPrice: demo ? "0.04" : null, chargeBasis: "per_piece", sizeIds: ["letter", "legal", "tabloid"], active: true },
-      { id: "binding", name: "Binding", unitPrice: demo ? "3.50" : null, chargeBasis: "flat_per_job", sizeIds: ["letter", "legal"], active: true },
-      { id: "file-setup", name: "File setup", unitPrice: demo ? "12.00" : null, chargeBasis: "flat_per_job", sizeIds: [], active: true },
+      { id: "double-sided", name: "Double-sided printing", informationText: null, imageAlt: null, imageUrl: null, unitPrice: demo ? "0.06" : null, chargeBasis: "per_printed_page", sizeIds: ["letter", "legal", "tabloid"], active: true },
+      { id: "folding", name: "Folding", informationText: null, imageAlt: null, imageUrl: null, unitPrice: demo ? "0.04" : null, chargeBasis: "per_piece", sizeIds: ["letter", "legal", "tabloid"], active: true },
+      { id: "binding", name: "Binding", informationText: null, imageAlt: null, imageUrl: null, unitPrice: demo ? "3.50" : null, chargeBasis: "flat_per_job", sizeIds: ["letter", "legal"], active: true },
+      { id: "file-setup", name: "File setup", informationText: null, imageAlt: null, imageUrl: null, unitPrice: demo ? "12.00" : null, chargeBasis: "flat_per_job", sizeIds: [], active: true },
     ],
     bulkTiers: demo
       ? [
@@ -98,4 +103,14 @@ export function minimumForSize(size: { id: string; name: string; minimumQuantity
   const sizeMinimum = size?.minimumQuantity ?? 1;
   const base = Math.max(sizeMinimum, productMinimum);
   return isBusinessCardSize(size) ? Math.max(200, base) : base;
+}
+
+export function finishingForSize<T extends { active: boolean; sizeIds: string[] }>(finishing: T[], sizeId: string | undefined) {
+  if (!sizeId) return [];
+  return finishing.filter((option) => option.active && (option.sizeIds.length === 0 || option.sizeIds.includes(sizeId)));
+}
+
+export function compatibleFinishingIds<T extends { id: string; active: boolean; sizeIds: string[] }>(finishing: T[], sizeId: string | undefined, selectedIds: string[]) {
+  const available = new Set(finishingForSize(finishing, sizeId).map((option) => option.id));
+  return selectedIds.filter((id) => available.has(id));
 }

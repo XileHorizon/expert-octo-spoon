@@ -25,7 +25,9 @@ export type SizeDraft = {
   base_price: string | null;
   billing_unit: BillingUnit;
   minimum_quantity: number;
+  max_auto_quote_quantity: number | null;
   manual_quote: boolean;
+  manual_quote_message: string | null;
   included_note: string | null;
   active: boolean;
   sort_order: number;
@@ -35,6 +37,9 @@ export type SizeDraft = {
 export type FinishingDraft = {
   id?: string;
   name: string;
+  information_text: string | null;
+  image_alt: string | null;
+  image_url: string | null;
   unit_price: string | null;
   charge_basis: ChargeBasis;
   size_ids: string[];
@@ -45,8 +50,12 @@ export type FinishingDraft = {
 export type BulkTierDraft = {
   id?: string;
   min_quantity: number;
+  unit_price: string | null;
   discount_percent: string | null;
   quantity_basis: QuantityBasis;
+  material_id: string | null;
+  color_mode: "color" | "black-white" | null;
+  sides: 1 | 2 | null;
   size_ids: string[];
   active: boolean;
   sort_order: number;
@@ -89,7 +98,9 @@ export function draftToCatalog(draft: PricingDraftState): Catalog {
         basePrice: size.base_price,
         billingUnit: size.billing_unit,
         minimumQuantity: size.minimum_quantity,
+        maxAutoQuoteQuantity: size.max_auto_quote_quantity,
         manualQuote: size.manual_quote,
+        manualQuoteMessage: size.manual_quote_message,
         includedNote: size.included_note,
         papers: size.papers.map((link) => {
           const paper = draft.papers.find((item) => item.id === link.material_id);
@@ -106,14 +117,20 @@ export function draftToCatalog(draft: PricingDraftState): Catalog {
       })),
     }],
     finishing: draft.finishing.filter((option) => option.id).map((option) => ({
-      id: option.id!, name: option.name, unitPrice: option.unit_price, chargeBasis: option.charge_basis,
+      id: option.id!, name: option.name, informationText: option.information_text,
+      imageAlt: option.image_alt, imageUrl: option.image_url,
+      unitPrice: option.unit_price, chargeBasis: option.charge_basis,
       sizeIds: option.size_ids, active: option.active,
     })),
     bulkTiers: draft.bulkTiers.map((tier, index) => ({
       id: tier.id ?? `draft-${index}`,
       minQuantity: tier.min_quantity,
+      unitPrice: tier.unit_price,
       discountPercent: tier.discount_percent,
       quantityBasis: tier.quantity_basis,
+      materialId: tier.material_id,
+      colorMode: tier.color_mode,
+      sides: tier.sides,
       sizeIds: tier.size_ids,
       active: tier.active,
     })),

@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import Decimal from "decimal.js";
 import {
   BILLING_UNIT_LABELS, CHARGE_BASIS_LABELS, QUANTITY_BASIS_LABELS,
   type BillingUnit, type ChargeBasis, type QuantityBasis,
 } from "@/lib/types";
 import { priceQuote } from "@/lib/pricing";
-import { draftToCatalog, type PaperDraft, type PricingDraftState, type SizeDraft } from "@/lib/pricing-draft";
+import { draftToCatalog, type FinishingDraft, type PaperDraft, type PricingDraftState, type SizeDraft } from "@/lib/pricing-draft";
 
 export type PricingSection = "papers" | "sizes" | "options" | "discounts";
 type Loaded = { draft: PricingDraftState; inUse: { papers: string[]; sizes: string[] } };
@@ -28,7 +29,7 @@ export function AdminPricing({
   const [issues, setIssues] = useState<string[]>([]);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [selectedSizeId, setSelectedSizeId] = useState<string | null>(null);
+  const [selectedSizeIndex, setSelectedSizeIndex] = useState(0);
   const liveRegion = useRef<HTMLDivElement>(null);
   
   const load = useCallback(async () => {
@@ -45,7 +46,6 @@ export function AdminPricing({
     };
     setLoaded({ draft: structuredClone(next), inUse: data.in_use });
     setDraft(next);
-    setSelectedSizeId((current) => current ?? next.sizes[0]?.id ?? null);
   }, []);
 
   useEffect(() => {
@@ -67,6 +67,15 @@ export function AdminPricing({
     setError(""); setIssues([]);
   }
 
+  function updateSavedMedia(id: string, patch: Pick<FinishingDraft, "image_url" | "image_alt">) {
+    const apply = (current: PricingDraftState) => ({
+      ...current,
+      finishing: current.finishing.map((option) => option.id === id ? { ...option, ...patch } : option),
+    });
+    setDraft((current) => current ? apply(current) : current);
+    setLoaded((current) => current ? { ...current, draft: apply(current.draft) } : current);
+  }
+
   async function save() {
     if (!draft) return;
     setSaving(true); setError(""); setIssues([]);
@@ -79,7 +88,11 @@ export function AdminPricing({
           delete clean.product_id;
           return clean;
         }),
-        finishing: draft.finishing,
+        finishing: draft.finishing.map((option) => ({
+          ...(option.id ? { id: option.id } : {}), name: option.name, information_text: option.information_text,
+          image_alt: option.image_alt, unit_price: option.unit_price, charge_basis: option.charge_basis,
+          size_ids: option.size_ids, active: option.active, sort_order: option.sort_order,
+        })),
         bulk_tiers: draft.bulkTiers,
         minimum_order_total: draft.minimumOrderTotal,
         mode_adjustments: {
@@ -109,7 +122,7 @@ export function AdminPricing({
   if (error && !draft) return <div className="portal-error" role="alert">{error}</div>;
   if (!draft || !loaded) return <p className="portal-loading">Loading pricing…</p>;
 
-  const selectedSize = draft.sizes.find((size) => size.id === selectedSizeId) ?? draft.sizes[0] ?? null;
+  const selectedSize = draft.sizes[selectedSizeIndex] ?? draft.sizes[0] ?? null;
 
   return (
   <>
@@ -153,14 +166,15 @@ export function AdminPricing({
         <SizesScreen
           draft={draft}
           size={selectedSize}
+          selectedIndex={draft.sizes[selectedSizeIndex] ? selectedSizeIndex : 0}
           inUse={loaded.inUse.sizes}
-          onSelect={setSelectedSizeId}
+          onSelect={setSelectedSizeIndex}
           update={update}
         />
       )}
 
       {section === "options" && (
-        <OptionsScreen draft={draft} update={update} />
+        <OptionsScreen draft={draft} update={update} onMediaSaved={updateSavedMedia} />
       )}
 
       {section === "discounts" && (
@@ -234,10 +248,10 @@ function PapersScreen({ draft, inUse, update }: { draft: PricingDraftState; inUs
   </section>;
 }
 
-function SizesScreen({ draft, size, inUse, onSelect, update }: { draft: PricingDraftState; size: SizeDraft | null; inUse: string[]; onSelect: (id: string) => void; update: (fn: (current: PricingDraftState) => PricingDraftState) => void }) {
+function SizesScreen({ draft, size, selectedIndex, inUse, onSelect, update }: { draft: PricingDraftState; size: SizeDraft | null; selectedIndex: number; inUse: string[]; onSelect: (index: number) => void; update: (fn: (current: PricingDraftState) => PricingDraftState) => void }) {
   const [addingPaper, setAddingPaper] = useState("");
   if (!size) return <p className="portal-empty">No print sizes configured yet.</p>;
-  const index = draft.sizes.findIndex((item) => item.id === size.id);
+  const index = selectedIndex;
   const change = (patch: Partial<SizeDraft>) => update((current) => ({ ...current, sizes: current.sizes.map((item, i) => i === index ? { ...item, ...patch } : item) }));
   const unit = BILLING_UNIT_LABELS[size.billing_unit].toLowerCase();
   const availablePapers = draft.papers.filter((paper) => paper.id && paper.active && !size.papers.some((link) => link.material_id === paper.id));
@@ -246,13 +260,13 @@ function SizesScreen({ draft, size, inUse, onSelect, update }: { draft: PricingD
     <header className="portal-heading"><h1>Sizes &amp; pricing</h1><p>Choose a size, then edit only the details that matter.</p></header>
 
     <div className="portal-card">
-      <div className="portal-card-head"><h2 className="portal-subhead">Print sizes</h2><button type="button" className="primary" onClick={() => update((current) => ({ ...current, sizes: [...current.sizes, { name: "New size", dimensions: null, base_price: null, billing_unit: "piece", minimum_quantity: 1, manual_quote: true, included_note: null, active: false, sort_order: current.sizes.length, papers: [] }] }))}>＋ Add size</button></div>
-      <div className="size-grid">{draft.sizes.map((item) => <button key={item.id} type="button" className={item.id === size.id ? "size-option active" : "size-option"} aria-pressed={item.id === size.id} onClick={() => item.id && onSelect(item.id)}>
+      <div className="portal-card-head"><h2 className="portal-subhead">Print sizes</h2><button type="button" className="primary" onClick={() => { onSelect(draft.sizes.length); update((current) => ({ ...current, sizes: [...current.sizes, { name: "New size", dimensions: null, base_price: null, billing_unit: "piece", minimum_quantity: 1, max_auto_quote_quantity: null, manual_quote: true, manual_quote_message: null, included_note: null, active: false, sort_order: current.sizes.length, papers: [] }] })); }}>＋ Add size</button></div>
+      <div className="size-grid">{draft.sizes.map((item, itemIndex) => <button key={item.id ?? `new-${itemIndex}`} type="button" className={itemIndex === index ? "size-option active" : "size-option"} aria-pressed={itemIndex === index} onClick={() => onSelect(itemIndex)}>
         <strong>{item.name}</strong>
         <small>{item.dimensions ?? "—"}</small>
         <em>{item.manual_quote ? "Manual quote" : money(item.base_price)}</em>
       </button>)}</div>
-      {draft.sizes.some((item) => !item.id) && <p className="portal-note">Save once to create new sizes, then select them to finish pricing.</p>}
+      {draft.sizes.some((item) => !item.id) && <p className="portal-note">New sizes are created when you save. Assign paper and finishing after the first save.</p>}
     </div>
 
     <div className="portal-card">
@@ -260,11 +274,10 @@ function SizesScreen({ draft, size, inUse, onSelect, update }: { draft: PricingD
         <h2 className="portal-subhead">{size.name}{size.dimensions ? ` — ${size.dimensions}` : ""}</h2>
         <div className="portal-row-actions">
           <label className="portal-check"><input type="checkbox" checked={size.active} onChange={(event) => change({ active: event.target.checked })}/> Active</label>
-          {size.id && !inUse.includes(size.id) && <button type="button" className="link danger" onClick={() => {
+          {(!size.id || !inUse.includes(size.id)) && <button type="button" className="link danger" onClick={() => {
             if (!window.confirm(`Remove ${size.name}? This takes effect only after Save changes.`)) return;
-            update((current) => ({ ...current, sizes: current.sizes.filter((item) => item.id !== size.id) }));
-            const replacement = draft.sizes.find((item) => item.id !== size.id)?.id;
-            if (replacement) onSelect(replacement);
+            update((current) => ({ ...current, sizes: current.sizes.filter((_, i) => i !== index) }));
+            onSelect(Math.max(0, index - 1));
           }}>Remove size</button>}
           {size.id && inUse.includes(size.id) && <small className="portal-note">Used in quote history — deactivate instead of deleting.</small>}
         </div>
@@ -286,8 +299,10 @@ function SizesScreen({ draft, size, inUse, onSelect, update }: { draft: PricingD
           </select>
         </label>
         <label>Minimum quantity<input type="number" min={1} value={size.minimum_quantity} onChange={(event) => change({ minimum_quantity: Math.max(1, Number(event.target.value) || 1) })}/></label>
+        <label>Maximum automatic quantity<input aria-label="Maximum automatic quantity" type="number" min={1} value={size.max_auto_quote_quantity ?? ""} placeholder="No maximum" onChange={(event) => change({ max_auto_quote_quantity: event.target.value ? Math.max(1, Number(event.target.value)) : null })}/><small>Higher quantities remain submittable as manual quote requests.</small></label>
         <label className="portal-check wide"><input type="checkbox" checked={size.manual_quote} onChange={(event) => change({ manual_quote: event.target.checked })}/> Always quote this size manually</label>
       </div>
+      <label className="portal-field-wide">Manual quote message<input aria-label="Manual quote message" maxLength={500} value={size.manual_quote_message ?? ""} placeholder="Pricing will be sent for approval." onChange={(event) => change({ manual_quote_message: event.target.value || null })}/></label>
       <label className="portal-field-wide">Included note<input value={size.included_note ?? ""} placeholder="Included: Standard 20 lb paper, black-and-white, single-sided" onChange={(event) => change({ included_note: event.target.value || null })}/></label>
     </div>
 
@@ -333,12 +348,16 @@ function SizesScreen({ draft, size, inUse, onSelect, update }: { draft: PricingD
   </section>;
 }
 
-function OptionsScreen({ draft, update }: { draft: PricingDraftState; update: (fn: (current: PricingDraftState) => PricingDraftState) => void }) {
+function OptionsScreen({ draft, update, onMediaSaved }: {
+  draft: PricingDraftState;
+  update: (fn: (current: PricingDraftState) => PricingDraftState) => void;
+  onMediaSaved: (id: string, patch: Pick<FinishingDraft, "image_url" | "image_alt">) => void;
+}) {
   return <section>
-    <header className="portal-heading"><h1>Print options &amp; finishing</h1><p>Set optional charges and where they apply.</p></header>
+    <header className="portal-heading"><h1>Print options &amp; finishing</h1><p>Set optional charges, customer guidance, and where each option applies.</p></header>
     <div className="portal-card">
       <h2 className="portal-subhead">Color and orientation adjustments</h2>
-      <p className="portal-note">Optional surcharge per selected size billing unit. A zero keeps today&apos;s price unchanged; no mode is assumed to be the baseline.</p>
+      <p className="portal-note">Legacy surcharge per selected size billing unit. Exact scoped unit rates take priority; use these only for sizes that still use a base price.</p>
       <div className="portal-fields">
         {([
           ["color", "Full color"], ["blackWhite", "Black & white"], ["portrait", "Portrait"], ["landscape", "Landscape"],
@@ -351,64 +370,119 @@ function OptionsScreen({ draft, update }: { draft: PricingDraftState; update: (f
     <div className="portal-card">
       <div className="portal-card-head">
         <div className="portal-legend"><p>Per piece = multiplied by printed item count</p><p>Per job = charged once</p></div>
-        <button type="button" className="primary" onClick={() => update((current) => ({ ...current, finishing: [...current.finishing, { name: "New option", unit_price: null, charge_basis: "per_piece", size_ids: [], active: true, sort_order: current.finishing.length }] }))}>＋ Add option</button>
+        <button type="button" className="primary" onClick={() => update((current) => ({ ...current, finishing: [...current.finishing, { name: "New option", information_text: null, image_alt: null, image_url: null, unit_price: null, charge_basis: "per_piece", size_ids: [], active: true, sort_order: current.finishing.length }] }))}>＋ Add option</button>
       </div>
-      {draft.finishing.length === 0 ? <p className="portal-empty">No finishing options yet.</p> : <table className="portal-table">
-        <thead><tr><th>Option name</th><th>Charge</th><th>Charge basis</th><th>Applicable sizes</th><th>Status</th></tr></thead>
-        <tbody>{draft.finishing.map((option, index) => {
+      {draft.finishing.length === 0 ? <p className="portal-empty">No finishing options yet.</p> : <div className="finishing-editor-list">
+        {draft.finishing.map((option, index) => {
           const change = (patch: Partial<typeof option>) => update((current) => ({ ...current, finishing: current.finishing.map((item, i) => i === index ? { ...item, ...patch } : item) }));
-          return <tr key={option.id ?? `new-${index}`}>
-            <td><input aria-label="Option name" value={option.name} onChange={(event) => change({ name: event.target.value })}/></td>
-            <td><input aria-label={`Charge for ${option.name}`} inputMode="decimal" value={option.unit_price ?? ""} placeholder="Manual" onChange={(event) => change({ unit_price: event.target.value || null })}/></td>
-            <td><select aria-label={`Charge basis for ${option.name}`} value={option.charge_basis} onChange={(event) => change({ charge_basis: event.target.value as ChargeBasis })}>
-              {Object.entries(CHARGE_BASIS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select></td>
-            <td><SizePicker sizes={draft.sizes} selected={option.size_ids} onChange={(size_ids) => change({ size_ids })}/></td>
-            <td className="portal-row-actions">
+          return <article className="finishing-editor" key={option.id ?? `new-${index}`}>
+            <div className="finishing-editor-fields">
+              <label>Option name<input aria-label="Option name" value={option.name} onChange={(event) => change({ name: event.target.value })}/></label>
+              <label>Charge<input aria-label={`Charge for ${option.name}`} inputMode="decimal" value={option.unit_price ?? ""} placeholder="Manual" onChange={(event) => change({ unit_price: event.target.value || null })}/></label>
+              <label>Charge basis<select aria-label={`Charge basis for ${option.name}`} value={option.charge_basis} onChange={(event) => change({ charge_basis: event.target.value as ChargeBasis })}>
+                {Object.entries(CHARGE_BASIS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select></label>
+              <div><span className="field-label">Applicable sizes</span><SizePicker sizes={draft.sizes} selected={option.size_ids} onChange={(size_ids) => change({ size_ids })}/></div>
+            </div>
+            <label className="portal-field-wide">Customer information<textarea aria-label={`Customer information for ${option.name}`} maxLength={2000} value={option.information_text ?? ""} placeholder="Example: Be sure to include bleed and cut lines." onChange={(event) => change({ information_text: event.target.value || null })}/></label>
+            <FinishingMediaEditor option={option} onChange={change} onMediaSaved={onMediaSaved}/>
+            <div className="portal-row-actions">
               <label className="portal-check"><input type="checkbox" checked={option.active} onChange={(event) => change({ active: event.target.checked })}/> Active</label>
               <button type="button" className="link danger" onClick={() => {
                 if (!window.confirm(`Remove ${option.name}? The change is staged until you save.`)) return;
                 update((current) => ({ ...current, finishing: current.finishing.filter((_, i) => i !== index) }));
-              }}>Remove</button>
-            </td>
-          </tr>;
-        })}</tbody>
-      </table>}
-      <p className="portal-note tint">Choose the charge basis in plain language so customers see predictable totals.</p>
+              }}>Remove option</button>
+            </div>
+          </article>;
+        })}
+      </div>}
+      <p className="portal-note tint">Information is displayed as plain text. Save a new option once before uploading its image.</p>
     </div>
   </section>;
 }
 
+function FinishingMediaEditor({ option, onChange, onMediaSaved }: {
+  option: FinishingDraft;
+  onChange: (patch: Partial<FinishingDraft>) => void;
+  onMediaSaved: (id: string, patch: Pick<FinishingDraft, "image_url" | "image_alt">) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function upload(file: File) {
+    if (!option.id) return setError("Save this new option before adding an image.");
+    const alt = option.image_alt?.trim();
+    if (!alt) return setError("Add image alt text before uploading.");
+    setBusy(true); setError("");
+    const body = new FormData(); body.set("file", file); body.set("altText", alt);
+    try {
+      const response = await fetch(`/api/admin/finishing-options/${option.id}/image`, { method: "PUT", body });
+      const data = await response.json();
+      if (!response.ok) return setError(data.error ?? "The example image could not be saved.");
+      onMediaSaved(option.id, { image_url: data.imageUrl, image_alt: data.imageAlt });
+    } catch { setError("The example image could not reach the server."); }
+    finally { setBusy(false); }
+  }
+
+  async function remove() {
+    if (!option.id || !window.confirm(`Remove the example image for ${option.name}?`)) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch(`/api/admin/finishing-options/${option.id}/image`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) return setError(data.error ?? "The example image could not be removed.");
+      onMediaSaved(option.id, { image_url: null, image_alt: null });
+    } catch { setError("The example image could not reach the server."); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="option-media-editor">
+    <label>Image alt text<input aria-label={`Image alt text for ${option.name}`} maxLength={255} value={option.image_alt ?? ""} placeholder="Describe the example image" onChange={(event) => onChange({ image_alt: event.target.value || null })}/></label>
+    {option.image_url && <Image src={option.image_url} width={320} height={180} alt={option.image_alt ?? ""} unoptimized/>}
+    <div className="portal-row-actions">
+      <label className="media-upload-button">{busy ? "Working…" : option.image_url ? "Replace image" : "Upload image"}<input type="file" accept="image/png,image/jpeg" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = ""; }}/></label>
+      {option.image_url && <button type="button" className="link danger" disabled={busy} onClick={() => void remove()}>Remove image</button>}
+    </div>
+    <small>PNG or JPEG, up to 2 MB and 3,000 × 3,000 pixels.</small>
+    {error && <small className="field-error" role="alert">{error}</small>}
+  </div>;
+}
+
 function DiscountsScreen({ draft, update }: { draft: PricingDraftState; update: (fn: (current: PricingDraftState) => PricingDraftState) => void }) {
+  const addRule = (kind: "rate" | "discount") => update((current) => ({
+    ...current,
+    bulkTiers: [...current.bulkTiers, {
+      min_quantity: 1, unit_price: kind === "rate" ? "0.00" : null,
+      discount_percent: kind === "discount" ? "10" : null, quantity_basis: "printed_pages",
+      material_id: null, color_mode: null, sides: null, size_ids: [], active: true,
+      sort_order: current.bulkTiers.length,
+    }],
+  }));
+
   return <section>
-    <header className="portal-heading"><h1>Bulk discounts</h1><p>Reward larger orders with simple quantity thresholds.</p></header>
+    <header className="portal-heading"><h1>Unit rates &amp; bulk pricing</h1><p>Keep exact rate tables auditable by size, color, paper, and quantity threshold. Single- and double-sided jobs use the same price.</p></header>
     <div className="portal-card">
       <div className="portal-card-head">
-        <p>Count quantity as <strong>{QUANTITY_BASIS_LABELS[draft.bulkTiers[0]?.quantity_basis ?? "printed_pages"]}</strong></p>
-        <button type="button" className="primary" onClick={() => update((current) => ({ ...current, bulkTiers: [...current.bulkTiers, { min_quantity: 100, discount_percent: "5", quantity_basis: current.bulkTiers[0]?.quantity_basis ?? "printed_pages", size_ids: [], active: true, sort_order: current.bulkTiers.length }] }))}>＋ Add threshold</button>
+        <div className="portal-legend"><p>Exact rates replace the size base price for matching selections.</p><p>Blank paper or color means the rule applies to every value. Printed sides never change pricing.</p></div>
+        <div className="portal-row-actions"><button type="button" onClick={() => addRule("rate")}>＋ Add unit rate</button><button type="button" className="primary" onClick={() => addRule("discount")}>＋ Add discount</button></div>
       </div>
-      {draft.bulkTiers.length === 0 ? <p className="portal-empty">No bulk discounts yet.</p> : <table className="portal-table">
-        <thead><tr><th>Starts at</th><th>Discount</th><th>Applies to print sizes</th><th>Counted as</th><th>Status</th></tr></thead>
+      {draft.bulkTiers.length === 0 ? <p className="portal-empty">No unit rates or bulk discounts yet.</p> : <table className="portal-table">
+        <thead><tr><th>Type / value</th><th>Starts at</th><th>Sizes</th><th>Paper</th><th>Color</th><th>Counted as</th><th>Status</th></tr></thead>
         <tbody>{draft.bulkTiers.map((tier, index) => {
           const change = (patch: Partial<typeof tier>) => update((current) => ({ ...current, bulkTiers: current.bulkTiers.map((item, i) => i === index ? { ...item, ...patch } : item) }));
+          const isRate = tier.unit_price !== null;
           return <tr key={tier.id ?? `new-${index}`}>
+            <td><label className="sr-only" htmlFor={`rule-type-${index}`}>Rule type</label><select id={`rule-type-${index}`} aria-label="Rule type" value={isRate ? "rate" : "discount"} onChange={(event) => change(event.target.value === "rate" ? { unit_price: "0.00", discount_percent: null } : { unit_price: null, discount_percent: "10" })}><option value="rate">Unit rate</option><option value="discount">Discount</option></select>{isRate ? <span className="suffix-field"><b>$</b><input aria-label="Unit rate" inputMode="decimal" value={tier.unit_price ?? ""} onChange={(event) => change({ unit_price: event.target.value || null })}/></span> : <span className="suffix-field"><input aria-label="Discount percent" inputMode="decimal" value={tier.discount_percent ?? ""} onChange={(event) => change({ discount_percent: event.target.value || null })}/><b>% off</b></span>}</td>
             <td><input aria-label="Threshold quantity" type="number" min={1} value={tier.min_quantity} onChange={(event) => change({ min_quantity: Math.max(1, Number(event.target.value) || 1) })}/></td>
-            <td><span className="suffix-field"><input aria-label="Discount percent" inputMode="decimal" value={tier.discount_percent ?? ""} onChange={(event) => change({ discount_percent: event.target.value || null })}/><b>% off</b></span></td>
             <td><SizePicker sizes={draft.sizes} selected={tier.size_ids} onChange={(size_ids) => change({ size_ids })}/></td>
-            <td><select aria-label="Counting basis" value={tier.quantity_basis} onChange={(event) => change({ quantity_basis: event.target.value as QuantityBasis })}>
-              {Object.entries(QUANTITY_BASIS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select></td>
-            <td className="portal-row-actions">
-              <label className="portal-check"><input type="checkbox" checked={tier.active} onChange={(event) => change({ active: event.target.checked })}/> Active</label>
-              <button type="button" className="link danger" onClick={() => {
-                if (!window.confirm(`Remove the ${tier.min_quantity.toLocaleString()} threshold? The change is staged until you save.`)) return;
-                update((current) => ({ ...current, bulkTiers: current.bulkTiers.filter((_, i) => i !== index) }));
-              }}>Remove</button>
-            </td>
+            <td><select aria-label="Paper scope" value={tier.material_id ?? ""} onChange={(event) => change({ material_id: event.target.value || null })}><option value="">Any paper</option>{draft.papers.filter((paper) => paper.id).map((paper) => <option key={paper.id} value={paper.id}>{paperLabel(paper)}</option>)}</select></td>
+            <td><select aria-label="Color scope" value={tier.color_mode ?? ""} onChange={(event) => change({ color_mode: (event.target.value || null) as typeof tier.color_mode })}><option value="">Any color</option><option value="black-white">Black &amp; white</option><option value="color">Color</option></select></td>
+            <td><select aria-label="Counting basis" value={tier.quantity_basis} onChange={(event) => change({ quantity_basis: event.target.value as QuantityBasis })}>{Object.entries(QUANTITY_BASIS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
+            <td className="portal-row-actions"><label className="portal-check"><input type="checkbox" checked={tier.active} onChange={(event) => change({ active: event.target.checked })}/> Active</label><button type="button" className="link danger" onClick={() => { if (window.confirm("Remove this pricing rule? The change is staged until you save.")) update((current) => ({ ...current, bulkTiers: current.bulkTiers.filter((_, i) => i !== index) })); }}>Remove</button></td>
           </tr>;
         })}</tbody>
       </table>}
-      <div className="portal-policy"><strong>How discounts work</strong><p>Only the highest qualifying discount applies. Discounts apply to printing and paper, not finishing or setup fees.</p></div>
+      <div className="portal-policy"><strong>How rules work</strong><p>The highest qualifying threshold wins. At the same threshold, a paper/color-specific rate wins over a broader one. Single- and double-sided selections use identical pricing. Discounts never reduce finishing or setup fees.</p></div>
     </div>
   </section>;
 }

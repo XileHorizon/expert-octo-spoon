@@ -47,8 +47,14 @@ export type SizePaper = {
 export type BulkTier = {
   id?: string;
   minQuantity: number;
+  /** Exact unit rate at this threshold. Mutually exclusive with discountPercent. */
+  unitPrice?: Money | null;
   discountPercent: Money | null;
   quantityBasis: QuantityBasis;
+  /** Optional rate/discount dimensions; null means any value. */
+  materialId?: string | null;
+  colorMode?: QuoteJobInput["colorMode"] | null;
+  sides?: 1 | 2 | null;
   /** Empty means the threshold applies to every size. */
   sizeIds: string[];
   active: boolean;
@@ -72,7 +78,10 @@ export type SizeOption = {
   basePrice: Money | null;
   billingUnit: BillingUnit;
   minimumQuantity: number;
+  /** Quantities above this value are accepted as manual quote requests. */
+  maxAutoQuoteQuantity?: number | null;
   manualQuote: boolean;
+  manualQuoteMessage?: string | null;
   includedNote: string | null;
   papers: SizePaper[];
 };
@@ -89,6 +98,10 @@ export type Product = {
 export type FinishingOption = {
   id: string;
   name: string;
+  informationText: string | null;
+  imageAlt: string | null;
+  /** Versioned API URL; image bytes are intentionally excluded from catalog JSON. */
+  imageUrl: string | null;
   unitPrice: Money | null;
   chargeBasis: ChargeBasis;
   /** Empty means the option applies to every size. */

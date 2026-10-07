@@ -8,11 +8,11 @@ const draft = {
   papers: [{ id: paperId, name: "Standard", weight: "20 lb", category: "Uncoated", active: true, sort_order: 0 }],
   sizes: [{
     id: sizeId, name: "Letter", dimensions: "8.5 × 11", base_price: "0.20", billing_unit: "printed_page" as const,
-    minimum_quantity: 1, manual_quote: false, included_note: null, active: true, sort_order: 0,
+    minimum_quantity: 1, max_auto_quote_quantity: null, manual_quote: false, manual_quote_message: null, included_note: null, active: true, sort_order: 0,
     papers: [{ material_id: paperId, surcharge: "0", is_standard: true, active: true }],
   }],
-  finishing: [{ name: "Folding", unit_price: "0.04", charge_basis: "per_piece" as const, size_ids: [sizeId], active: true, sort_order: 0 }],
-  bulk_tiers: [{ min_quantity: 100, discount_percent: "5", quantity_basis: "printed_pages" as const, size_ids: [sizeId], active: true, sort_order: 0 }],
+  finishing: [{ name: "Folding", information_text: "Include bleed and cut lines.", image_alt: null, unit_price: "0.04", charge_basis: "per_piece" as const, size_ids: [sizeId], active: true, sort_order: 0 }],
+  bulk_tiers: [{ min_quantity: 100, unit_price: null, discount_percent: "5", quantity_basis: "printed_pages" as const, material_id: null, color_mode: null, sides: null, size_ids: [sizeId], active: true, sort_order: 0 }],
   minimum_order_total: "0.00",
   mode_adjustments: { color: "0", black_white: "0", portrait: "0", landscape: "0" },
 };
@@ -60,6 +60,19 @@ describe("pricing draft validation", () => {
 
   it("requires a minimum quantity of at least one", () => {
     expect(parse({ ...draft, sizes: [{ ...draft.sizes[0], minimum_quantity: 0 }] }).success).toBe(false);
+  });
+
+  it("accepts scoped exact rates and validates the auto-quote ceiling", () => {
+    const rate = { ...draft.bulk_tiers[0], min_quantity: 1, unit_price: "0.12", discount_percent: null, material_id: paperId, color_mode: "black-white" as const, sides: 1 as const };
+    expect(parse({ ...draft, bulk_tiers: [rate] }).success).toBe(true);
+    expect(parse({ ...draft, bulk_tiers: [{ ...rate, discount_percent: "10" }] }).success).toBe(false);
+    expect(parse({ ...draft, sizes: [{ ...draft.sizes[0], minimum_quantity: 10, max_auto_quote_quantity: 9 }] }).success).toBe(false);
+  });
+
+  it("accepts bounded plain finishing guidance and rejects empty image alt text", () => {
+    expect(parse(draft).success).toBe(true);
+    expect(parse({ ...draft, finishing: [{ ...draft.finishing[0], information_text: "x".repeat(2001) }] }).success).toBe(false);
+    expect(parse({ ...draft, finishing: [{ ...draft.finishing[0], image_alt: " " }] }).success).toBe(false);
   });
 });
 

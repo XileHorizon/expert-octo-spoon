@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getSeedCatalog, minimumForSize } from "./catalog";
+import { compatibleFinishingIds, finishingForSize, getSeedCatalog, minimumForSize } from "./catalog";
 
 const expected: Record<string, string[]> = {
   Letter: ["Standard", "Premium Color", "Gloss Paper", "Cardstock"],
@@ -9,10 +9,12 @@ const expected: Record<string, string[]> = {
   "Large Poster": ["Paper options to be confirmed"],
   "Business Cards": ["Business card stock", "Business card stock"],
   Custom: ["Paper options to be confirmed"],
+  "5 × 7 Cards": ["Card stock"],
+  "4 × 6 Cards": ["Card stock"],
 };
 
 describe("starter catalog", () => {
-  it("contains all seven required sizes in order", () => {
+  it("contains all nine required sizes in order", () => {
     expect(getSeedCatalog().products[0].sizes.map((size) => size.name)).toEqual(Object.keys(expected));
   });
 
@@ -47,6 +49,19 @@ describe("starter catalog", () => {
     const sizes = getSeedCatalog().products[0].sizes;
     expect(sizes.find((size) => size.name === "Custom")?.manualQuote).toBe(true);
     expect(sizes.find((size) => size.name === "Poster")?.manualQuote).toBe(true);
+    expect(sizes.find((size) => size.name === "Business Cards")?.manualQuoteMessage).toContain("sent for approval");
+    expect(sizes.find((size) => size.name === "5 × 7 Cards")?.maxAutoQuoteQuantity).toBe(200);
     expect(sizes.find((size) => size.name === "Letter")?.manualQuote).toBe(false);
+  });
+
+  it("filters finishing by size and removes selections that become incompatible", () => {
+    const finishing = [
+      { id: "all", active: true, sizeIds: [] },
+      { id: "letter", active: true, sizeIds: ["letter"] },
+      { id: "legal", active: true, sizeIds: ["legal"] },
+      { id: "hidden", active: false, sizeIds: [] },
+    ];
+    expect(finishingForSize(finishing, "letter").map((option) => option.id)).toEqual(["all", "letter"]);
+    expect(compatibleFinishingIds(finishing, "legal", ["all", "letter", "legal", "hidden"])).toEqual(["all", "legal"]);
   });
 });
