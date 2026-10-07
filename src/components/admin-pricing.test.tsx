@@ -83,7 +83,8 @@ describe("AdminPricing toolbar", () => {
     const added = screen.getByRole("button", { name: /New size/ });
     expect(added.getAttribute("aria-pressed")).toBe("true");
     expect((screen.getByRole("checkbox", { name: "Active" }) as HTMLInputElement).checked).toBe(true);
-    expect(screen.getByText("20 lb Bond")).toBeTruthy();
+    expect(screen.getAllByText("20 lb Bond").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Standard").length).toBeGreaterThan(0);
     fireEvent.change(screen.getByLabelText("Size name"), { target: { value: "Tabloid" } });
     fireEvent.change(screen.getByLabelText("Dimensions"), { target: { value: "11 × 17" } });
     expect(screen.getByRole("button", { name: /Tabloid/ }).getAttribute("aria-pressed")).toBe("true");
