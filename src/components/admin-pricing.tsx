@@ -260,13 +260,13 @@ function SizesScreen({ draft, size, selectedIndex, inUse, onSelect, update }: { 
     <header className="portal-heading"><h1>Sizes &amp; pricing</h1><p>Choose a size, then edit only the details that matter.</p></header>
 
     <div className="portal-card">
-      <div className="portal-card-head"><h2 className="portal-subhead">Print sizes</h2><button type="button" className="primary" onClick={() => { onSelect(draft.sizes.length); update((current) => ({ ...current, sizes: [...current.sizes, { name: "New size", dimensions: null, base_price: null, billing_unit: "piece", minimum_quantity: 1, max_auto_quote_quantity: null, manual_quote: true, manual_quote_message: null, included_note: null, active: false, sort_order: current.sizes.length, papers: [] }] })); }}>＋ Add size</button></div>
+      <div className="portal-card-head"><h2 className="portal-subhead">Print sizes</h2><button type="button" className="primary" onClick={() => { onSelect(draft.sizes.length); update((current) => ({ ...current, sizes: [...current.sizes, { name: "New size", dimensions: null, base_price: null, billing_unit: "piece", minimum_quantity: 1, max_auto_quote_quantity: null, manual_quote: true, manual_quote_message: null, included_note: null, active: true, sort_order: current.sizes.length, papers: current.papers.filter((paper) => paper.id && paper.active).map((paper, paperIndex) => ({ material_id: paper.id!, surcharge: "0", is_standard: paperIndex === 0, active: true })) }] })); }}>＋ Add size</button></div>
       <div className="size-grid">{draft.sizes.map((item, itemIndex) => <button key={item.id ?? `new-${itemIndex}`} type="button" className={itemIndex === index ? "size-option active" : "size-option"} aria-pressed={itemIndex === index} onClick={() => onSelect(itemIndex)}>
         <strong>{item.name}</strong>
         <small>{item.dimensions ?? "—"}</small>
         <em>{item.manual_quote ? "Manual quote" : money(item.base_price)}</em>
       </button>)}</div>
-      {draft.sizes.some((item) => !item.id) && <p className="portal-note">New sizes are created when you save. Assign paper and finishing after the first save.</p>}
+      {draft.sizes.some((item) => !item.id) && <p className="portal-note">New sizes start active as manual-quote sizes with every active paper. Set pricing and paper, then Save changes to show them to customers. Finishing options can be assigned after the first save.</p>}
     </div>
 
     <div className="portal-card">
